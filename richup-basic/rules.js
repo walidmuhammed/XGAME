@@ -7,7 +7,10 @@ const DEFAULT_CONFIG = {
   maxPlayers: 6,
   startCash: 1500,
   logLimit: 40,
+  evenBuild: true,
 };
+
+const MORTGAGE_INTEREST_RATE = 0.1;
 
 const SURPRISE_CARDS = [
   { id: "surprise-cash--100", deck: "surprise", kind: "cash", amount: -100, text: "Pay inspection fees (−100)" },
@@ -37,6 +40,8 @@ export function createInitialState(config = {}) {
   return {
     players: [],
     tileOwnership: createEmptyOwnership(),
+    structures: createEmptyStructures(),
+    mortgages: createEmptyMortgages(),
     turn: createInitialTurn(),
     decks: {
       surprise: { draw: [], discard: [] },
@@ -44,11 +49,18 @@ export function createInitialState(config = {}) {
     },
     log: [],
     config: mergedConfig,
+    pendingTrade: null,
+    debtContext: {
+      active: false,
+      amountOwed: 0,
+      creditor: null,
+    },
     meta: {
       winner: null,
       rngSeed: null,
       seed: null,
       logCounter: 0,
+      tradeCounter: 0,
     },
   };
 }
@@ -67,6 +79,34 @@ export function stepTurn(state, intent) {
       return handlePayBail(state);
     case "USE_LEAVE_JAIL_CARD":
       return handleUseLeaveJail(state);
+    case "BUILD_HOUSE":
+      return handleBuildHouse(state, intent.payload || {});
+    case "SELL_HOUSE":
+      return handleSellHouse(state, intent.payload || {});
+    case "TOGGLE_EVEN_BUILD":
+      return handleToggleEvenBuild(state, intent.payload || {});
+    case "MORTGAGE_PROPERTY":
+      return handleMortgageProperty(state, intent.payload || {});
+    case "UNMORTGAGE_PROPERTY":
+      return handleUnmortgageProperty(state, intent.payload || {});
+    case "OPEN_TRADE":
+      return handleOpenTrade(state, intent.payload || {});
+    case "PROPOSE_TRADE":
+      return handleProposeTrade(state, intent.payload || {});
+    case "COUNTER_TRADE":
+      return handleCounterTrade(state, intent.payload || {});
+    case "ACCEPT_TRADE":
+      return handleAcceptTrade(state);
+    case "DECLINE_TRADE":
+      return handleDeclineTrade(state);
+    case "CANCEL_TRADE":
+      return handleCancelTrade(state);
+    case "BEGIN_DEBT_RESOLUTION":
+      return handleBeginDebtResolution(state, intent.payload || {});
+    case "AUTO_LIQUIDATE":
+      return handleAutoLiquidate(state);
+    case "END_DEBT_RESOLUTION":
+      return handleEndDebtResolution(state, intent.payload || {});
     default:
       return cloneState(state);
   }
@@ -81,6 +121,11 @@ export const selectors = {
   getMovementPath: (state) => state.turn.movement,
   getChainMovements: (state) => state.turn.chainMovements || [],
   getOwnership: (state) => state.tileOwnership,
+  getHouseCount: (state, tileId) => state.structures?.[tileId] ?? 0,
+  getConfig: (state) => state.config,
+  getMortgages: (state) => state.mortgages,
+  getPendingTrade: (state) => state.pendingTrade,
+  getDebtContext: (state) => state.debtContext,
   hasWinner: (state) => Boolean(state.meta.winner),
 };
 
@@ -109,6 +154,8 @@ function startNewGame(prevState, payload) {
 
   base.players = players;
   base.tileOwnership = createEmptyOwnership();
+  base.structures = createEmptyStructures();
+  base.mortgages = createEmptyMortgages();
   base.turn = createInitialTurn();
 
   if (payload.seed) {
@@ -123,6 +170,15 @@ function startNewGame(prevState, payload) {
     surprise: createDeck(SURPRISE_CARDS, base),
     treasure: createDeck(TREASURE_CARDS, base),
   };
+
+  base.config.evenBuild = payload.evenBuild ?? true;
+  base.pendingTrade = null;
+  base.debtContext = {
+    active: false,
+    amountOwed: 0,
+    creditor: null,
+  };
+  base.meta.tradeCounter = 0;
 
   pushLog(base, `New game: ${players.length} players ready.`);
   return base;
@@ -220,7 +276,10 @@ function handleBuy(state) {
   player.cash -= tile.price;
   player.owned.push(tileId);
   next.tileOwnership[tileId] = player.id;
+  ensureMortgages(next);
+  next.mortgages[tileId] = false;
   pushLog(next, `${player.name} buys ${tile.name} for $${tile.price}.`);
+  updateDebtAfterAction(next, player);
 
   next.turn.pendingPurchase = null;
   determineWinner(next);
@@ -259,6 +318,7 @@ function handleEndTurn(state) {
   next.turn.pendingCard = null;
   next.turn.allowExtraRoll = false;
   next.turn.mustEnd = false;
+  next.turn.debtLocked = Boolean(next.debtContext?.active);
 
   const upcoming = getCurrentPlayer(next);
   if (upcoming) {
@@ -282,7 +342,11 @@ function handlePayBail(state) {
   pushLog(next, `${player.name} pays $${next.config.bail} to leave Jail.`);
   player.inJail = false;
   player.jailTurns = 0;
-  checkBankruptcy(next, player);
+  if (player.cash < 0) {
+    activateDebtContext(next, player, "bank");
+  } else {
+    updateDebtAfterAction(next, player);
+  }
   return next;
 }
 
@@ -308,6 +372,285 @@ function handleUseLeaveJail(state) {
   pushLog(next, `${player.name} uses a Get out of Jail card.`);
   player.inJail = false;
   player.jailTurns = 0;
+  return next;
+}
+
+function handleBuildHouse(state, payload) {
+  const next = cloneState(state);
+  if (!next.structures) {
+    next.structures = createEmptyStructures();
+  }
+  if (next.meta.winner) return next;
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const tileId = typeof payload.tileId === "number" ? payload.tileId : null;
+  if (tileId === null) return next;
+  const tile = BOARD_TILES.find((t) => t.id === tileId && t.type === "property");
+  if (!tile) return next;
+
+  if (!canBuildHere(next, player.id, tileId)) {
+    return next;
+  }
+
+  const cost = tile.houseCost;
+  player.cash -= cost;
+  next.structures[tileId] = (next.structures?.[tileId] ?? 0) + 1;
+  const isHotel = next.structures[tileId] === 5;
+  const label = isHotel ? "a hotel" : "a house";
+  pushLog(next, `${player.name} builds ${label} on ${tile.name} (cost $${cost}).`);
+  updateDebtAfterAction(next, player);
+  return next;
+}
+
+function handleSellHouse(state, payload) {
+  const next = cloneState(state);
+  if (!next.structures) {
+    next.structures = createEmptyStructures();
+  }
+  if (next.meta.winner) return next;
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const tileId = typeof payload.tileId === "number" ? payload.tileId : null;
+  if (tileId === null) return next;
+  const tile = BOARD_TILES.find((t) => t.id === tileId && t.type === "property");
+  if (!tile) return next;
+
+  if (!canSellHere(next, player.id, tileId)) {
+    return next;
+  }
+
+  const current = next.structures?.[tileId] ?? 0;
+  const wasHotel = current === 5;
+  const refund = Math.floor(tile.houseCost / 2);
+  next.structures[tileId] = Math.max(0, current - 1);
+  player.cash += refund;
+  const label = wasHotel ? "a hotel" : "a house";
+  pushLog(next, `${player.name} sells ${label} on ${tile.name} (refund $${refund}).`);
+  updateDebtAfterAction(next, player);
+  return next;
+}
+
+function handleToggleEvenBuild(state, payload) {
+  const next = cloneState(state);
+  const desired = typeof payload.value === "boolean" ? payload.value : !next.config.evenBuild;
+  if (next.config.evenBuild === desired) {
+    return next;
+  }
+  next.config.evenBuild = desired;
+  pushLog(next, `Even-Build rule ${desired ? "enabled" : "disabled"}.`);
+  return next;
+}
+
+function handleOpenTrade(state, payload) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const partnerId = payload?.partnerId;
+  const partner = findPlayerById(next, partnerId);
+  if (!partner || partner.bankrupt || partner.id === player.id) return next;
+  next.pendingTrade = {
+    id: createTradeId(next),
+    from: player.id,
+    to: partner.id,
+    offer: { cash: 0, properties: [] },
+    request: { cash: 0, properties: [] },
+    status: "proposed",
+    awaiting: partner.id,
+  };
+  pushLog(next, `${player.name} opens a trade discussion with ${partner.name}.`);
+  return next;
+}
+
+function handleProposeTrade(state, payload) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const trade = next.pendingTrade;
+  if (!trade || trade.from !== player.id) return next;
+  const offer = normalizeTradeSide(next, trade.from, payload?.offer);
+  const request = normalizeTradeSide(next, trade.to, payload?.request);
+  trade.offer = offer;
+  trade.request = request;
+  trade.status = "proposed";
+  trade.awaiting = trade.to;
+  const partner = findPlayerById(next, trade.to);
+  if (partner) {
+    pushLog(next, `${player.name} proposes a trade with ${partner.name}.`);
+  }
+  return next;
+}
+
+function handleCounterTrade(state, payload) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const trade = next.pendingTrade;
+  if (!trade || trade.to !== player.id) return next;
+  const offer = normalizeTradeSide(next, trade.from, payload?.offer);
+  const request = normalizeTradeSide(next, trade.to, payload?.request);
+  trade.offer = offer;
+  trade.request = request;
+  trade.status = "countered";
+  trade.awaiting = trade.from;
+  const initiator = findPlayerById(next, trade.from);
+  if (initiator) {
+    pushLog(next, `${player.name} counters the trade proposal from ${initiator.name}.`);
+  }
+  return next;
+}
+
+function handleDeclineTrade(state) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player) return next;
+  const trade = next.pendingTrade;
+  if (!trade) return next;
+  if (trade.awaiting !== player.id && trade.from !== player.id && trade.to !== player.id) return next;
+  const otherId = trade.from === player.id ? trade.to : trade.from;
+  const other = findPlayerById(next, otherId);
+  if (other) {
+    pushLog(next, `${player.name} declines the trade with ${other.name}.`);
+  }
+  next.pendingTrade = null;
+  return next;
+}
+
+function handleCancelTrade(state) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player) return next;
+  const trade = next.pendingTrade;
+  if (!trade || trade.from !== player.id) return next;
+  const partner = findPlayerById(next, trade.to);
+  if (partner) {
+    pushLog(next, `${player.name} cancels the trade with ${partner.name}.`);
+  }
+  next.pendingTrade = null;
+  return next;
+}
+
+function handleAcceptTrade(state) {
+  const next = cloneState(state);
+  const responder = getCurrentPlayer(next);
+  if (!responder || responder.bankrupt) return next;
+  const trade = next.pendingTrade;
+  if (!trade || trade.awaiting !== responder.id) return next;
+
+  const initiator = findPlayerById(next, trade.from);
+  const partner = findPlayerById(next, trade.to);
+  if (!initiator || !partner || initiator.bankrupt || partner.bankrupt) {
+    next.pendingTrade = null;
+    return next;
+  }
+
+  const offer = normalizeTradeSide(next, trade.from, trade.offer);
+  const request = normalizeTradeSide(next, trade.to, trade.request);
+
+  if (offer.properties.length !== trade.offer.properties.length || request.properties.length !== trade.request.properties.length) {
+    // underlying ownership changed; invalidate trade
+    next.pendingTrade = null;
+    pushLog(next, `Trade canceled because terms are no longer valid.`);
+    return next;
+  }
+
+  const fromCashAfter = initiator.cash - offer.cash + request.cash;
+  const toCashAfter = partner.cash - request.cash + offer.cash;
+  if (fromCashAfter < 0 || toCashAfter < 0) {
+    pushLog(next, `Trade rejected: insufficient funds to complete the exchange.`);
+    return next;
+  }
+
+  // final validation that properties still owned
+  const offerValid = offer.properties.every((tileId) => next.tileOwnership[tileId] === initiator.id);
+  const requestValid = request.properties.every((tileId) => next.tileOwnership[tileId] === partner.id);
+  if (!offerValid || !requestValid) {
+    next.pendingTrade = null;
+    pushLog(next, `Trade canceled because property ownership changed.`);
+    return next;
+  }
+
+  initiator.cash = fromCashAfter;
+  partner.cash = toCashAfter;
+
+  offer.properties.forEach((tileId) => {
+    transferPropertyOwnership(next, initiator, partner, tileId);
+  });
+  request.properties.forEach((tileId) => {
+    transferPropertyOwnership(next, partner, initiator, tileId);
+  });
+
+  next.pendingTrade = null;
+  const offerDesc = describeTradeSide(next, offer);
+  const requestDesc = describeTradeSide(next, request);
+  pushLog(next, `${responder.name} accepts the trade. ${initiator.name} gives ${offerDesc}; ${partner.name} gives ${requestDesc}.`);
+
+  updateDebtAfterAction(next, initiator);
+  updateDebtAfterAction(next, partner);
+  return next;
+}
+
+function handleBeginDebtResolution(state, payload) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const creditor = payload?.creditor || next.debtContext?.creditor || "bank";
+  const amount = typeof payload?.amountOwed === "number" ? Math.max(0, payload.amountOwed) : Math.max(0, -player.cash);
+  activateDebtContext(next, player, creditor);
+  const debt = ensureDebtContext(next);
+  debt.amountOwed = Math.max(debt.amountOwed, amount, Math.max(0, -player.cash));
+  return next;
+}
+
+function handleAutoLiquidate(state) {
+  const next = cloneState(state);
+  autoLiquidate(next);
+  return next;
+}
+
+function handleEndDebtResolution(state, payload = {}) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player) return next;
+  if (player.cash >= 0) {
+    clearDebtContext(next);
+    pushLog(next, `${player.name} resolves their debt obligations.`);
+    return next;
+  }
+  const creditor = next.debtContext?.creditor || "bank";
+  if (payload.surrender) {
+    pushLog(next, `${player.name} surrenders and cannot cover their debt.`);
+  }
+  finalizeBankruptcy(next, player, creditor);
+  return next;
+}
+
+function handleMortgageProperty(state, payload) {
+  const next = cloneState(state);
+  ensureMortgages(next);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const tileId = typeof payload.tileId === "number" ? payload.tileId : null;
+  if (tileId === null) return next;
+  const tile = getMortgageableTile(tileId);
+  if (!tile) return next;
+  if (!canMortgageHere(next, player.id, tileId)) return next;
+  applyMortgage(next, player, tile);
+  updateDebtAfterAction(next, player);
+  return next;
+}
+
+function handleUnmortgageProperty(state, payload) {
+  const next = cloneState(state);
+  ensureMortgages(next);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const tileId = typeof payload.tileId === "number" ? payload.tileId : null;
+  if (tileId === null) return next;
+  const tile = getMortgageableTile(tileId);
+  if (!tile) return next;
+  if (!canUnmortgageHere(next, player.id, tileId)) return next;
+  applyUnmortgage(next, player, tile);
+  updateDebtAfterAction(next, player);
   return next;
 }
 
@@ -350,7 +693,11 @@ function processJailRoll(state, player, roll) {
     state.turn.mustEnd = true;
   }
 
-  checkBankruptcy(state, player);
+  if (player.cash < 0) {
+    activateDebtContext(state, player, "bank");
+  } else {
+    updateDebtAfterAction(state, player);
+  }
   determineWinner(state);
   return state;
 }
@@ -382,7 +729,11 @@ function resolveTile(state, player, roll, options = {}) {
     case "tax":
       player.cash -= tile.tax;
       pushLog(state, `${player.name} pays $${tile.tax} in taxes.`);
-      checkBankruptcy(state, player);
+      if (player.cash < 0) {
+        activateDebtContext(state, player, "bank");
+      } else {
+        updateDebtAfterAction(state, player);
+      }
       break;
     case "property":
       resolveProperty(state, player, tile);
@@ -420,18 +771,25 @@ function resolveProperty(state, player, tile) {
   const owner = findPlayerById(state, ownerId);
   if (!owner || owner.bankrupt) {
     state.tileOwnership[tile.id] = null;
+    if (state.structures) {
+      state.structures[tile.id] = 0;
+    }
+    if (state.mortgages) {
+      state.mortgages[tile.id] = false;
+    }
     state.turn.pendingPurchase = tile.id;
     pushLog(state, `${tile.name} is now unowned. ${player.name} may buy it for $${tile.price}.`);
     return;
   }
 
-  const ownsGroup = owner.owned.filter((id) => {
-    const ownedTile = BOARD_TILES.find((t) => t.id === id);
-    return ownedTile && ownedTile.group === tile.group;
-  });
-  const groupTiles = BOARD_TILES.filter((t) => t.group === tile.group);
-  const rentValue = ownsGroup.length === groupTiles.length ? tile.baseRent * 2 : tile.baseRent;
+  if (state.mortgages?.[tile.id]) {
+    pushLog(state, `${tile.name} is mortgaged. No rent is due.`);
+    return;
+  }
 
+  const houses = state.structures?.[tile.id] ?? 0;
+  const rentTable = Array.isArray(tile.rents) ? tile.rents : [];
+  const rentValue = rentTable[houses] ?? rentTable[rentTable.length - 1] ?? 0;
   transferCash(state, player, owner, rentValue, `${player.name} pays $${rentValue} rent to ${owner.name} for ${tile.name}.`);
 }
 
@@ -451,7 +809,15 @@ function resolveRail(state, player, tile) {
   if (!owner || owner.bankrupt) {
     state.tileOwnership[tile.id] = null;
     state.turn.pendingPurchase = tile.id;
+    if (state.mortgages) {
+      state.mortgages[tile.id] = false;
+    }
     pushLog(state, `${tile.name} becomes available to buy for $${tile.price}.`);
+    return;
+  }
+
+  if (state.mortgages?.[tile.id]) {
+    pushLog(state, `${tile.name} is mortgaged. No rent is due.`);
     return;
   }
 
@@ -480,7 +846,15 @@ function resolveUtility(state, player, tile, roll) {
   if (!owner || owner.bankrupt) {
     state.tileOwnership[tile.id] = null;
     state.turn.pendingPurchase = tile.id;
+    if (state.mortgages) {
+      state.mortgages[tile.id] = false;
+    }
     pushLog(state, `${tile.name} becomes available to buy for $${tile.price}.`);
+    return;
+  }
+
+  if (state.mortgages?.[tile.id]) {
+    pushLog(state, `${tile.name} is mortgaged. No utility fees today.`);
     return;
   }
 
@@ -510,7 +884,11 @@ function applyCardEffect(state, player, card) {
       } else {
         pushLog(state, `${player.name} pays $${Math.abs(card.amount)}.`);
       }
-      checkBankruptcy(state, player);
+      if (player.cash < 0) {
+        activateDebtContext(state, player, "bank");
+      } else {
+        updateDebtAfterAction(state, player);
+      }
       break;
     case "cashEach":
       let totalCollected = 0;
@@ -519,10 +897,18 @@ function applyCardEffect(state, player, card) {
         other.cash -= card.amount;
         totalCollected += card.amount;
         pushLog(state, `${other.name} pays $${card.amount} to ${player.name}.`);
-        checkBankruptcy(state, other);
+        if (other.cash < 0) {
+          activateDebtContext(state, other, player.id);
+        } else {
+          updateDebtAfterAction(state, other);
+        }
       });
       player.cash += totalCollected;
-      checkBankruptcy(state, player);
+      if (player.cash < 0) {
+        activateDebtContext(state, player, "bank");
+      } else {
+        updateDebtAfterAction(state, player);
+      }
       break;
     case "moveTo":
       movePlayerTo(state, player, card.tile, { awardSalary: true, log: card.text });
@@ -563,6 +949,7 @@ function movePlayerTo(state, player, targetTile, options = {}) {
   if (options.awardSalary && passesStartExact(current, normalizedTarget)) {
     player.cash += state.config.salary;
     pushLog(state, `${player.name} collects $${state.config.salary} for passing START.`);
+    updateDebtAfterAction(state, player);
   }
   player.position = normalizedTarget;
   resolveTile(state, player, { total: 0, dice: [], isDouble: false }, { fromCard: true });
@@ -607,33 +994,25 @@ function transferCash(state, fromPlayer, toPlayer, amount, message) {
   fromPlayer.cash -= amount;
   toPlayer.cash += amount;
   pushLog(state, message);
-  const fromBankrupt = checkBankruptcy(state, fromPlayer);
-  if (!fromBankrupt) {
-    checkBankruptcy(state, toPlayer);
+  if (fromPlayer.cash < 0) {
+    const creditor = toPlayer ? toPlayer.id : "bank";
+    activateDebtContext(state, fromPlayer, creditor);
+  } else {
+    updateDebtAfterAction(state, fromPlayer);
   }
-}
-
-function checkBankruptcy(state, player) {
-  if (player.bankrupt) return true;
-  if (player.cash >= 0) return false;
-
-  pushLog(state, `${player.name} is bankrupt and out of the game.`);
-  player.bankrupt = true;
-  player.cash = 0;
-  player.position = -1;
-  player.inJail = false;
-  player.jailTurns = 0;
-  releaseProperties(state, player.id);
-  releaseHeldCards(state, player);
-  state.turn.mustEnd = true;
-  determineWinner(state);
-  return true;
+  updateDebtAfterAction(state, toPlayer);
 }
 
 function releaseProperties(state, playerId) {
   Object.keys(state.tileOwnership).forEach((key) => {
     if (state.tileOwnership[key] === playerId) {
       state.tileOwnership[key] = null;
+      if (state.structures) {
+        state.structures[key] = 0;
+      }
+      if (state.mortgages) {
+        state.mortgages[key] = false;
+      }
     }
   });
   const player = findPlayerById(state, playerId);
@@ -787,6 +1166,138 @@ function canBuyCurrentTile(state) {
   return !state.tileOwnership[tile.id] && player.cash >= tile.price;
 }
 
+export function ownsFullGroup(state, playerId, group) {
+  if (!group || !playerId) return false;
+  const tiles = BOARD_TILES.filter((tile) => tile.type === "property" && tile.group === group);
+  if (!tiles.length) return false;
+  return tiles.every((tile) => state.tileOwnership[tile.id] === playerId);
+}
+
+export function canBuildHere(state, playerId, tileId) {
+  if (typeof tileId !== "number" || !playerId) return false;
+  const tile = BOARD_TILES.find((t) => t.id === tileId && t.type === "property");
+  if (!tile) return false;
+  if (!isBuildSellPhase(state)) return false;
+  if (!isPlayersTurn(state, playerId)) return false;
+  if (state.tileOwnership[tileId] !== playerId) return false;
+  if (!ownsFullGroup(state, playerId, tile.group)) return false;
+  if (state.mortgages?.[tileId]) return false;
+  if (groupHasMortgaged(state, tile.group)) return false;
+  const player = findPlayerById(state, playerId);
+  if (!player || player.bankrupt) return false;
+  const houses = state.structures?.[tileId] ?? 0;
+  if (houses >= 5) return false;
+  if (player.cash < tile.houseCost) return false;
+  if (!state.config.evenBuild) return true;
+  return wouldKeepEven(state, tileId, +1);
+}
+
+export function canSellHere(state, playerId, tileId) {
+  if (typeof tileId !== "number" || !playerId) return false;
+  const tile = BOARD_TILES.find((t) => t.id === tileId && t.type === "property");
+  if (!tile) return false;
+  if (!isBuildSellPhase(state)) return false;
+  if (!isPlayersTurn(state, playerId)) return false;
+  if (state.tileOwnership[tileId] !== playerId) return false;
+  if (!ownsFullGroup(state, playerId, tile.group)) return false;
+  const houses = state.structures?.[tileId] ?? 0;
+  if (houses <= 0) return false;
+  if (!state.config.evenBuild) return true;
+  return wouldKeepEven(state, tileId, -1);
+}
+
+export function canMortgageHere(state, playerId, tileId) {
+  if (typeof tileId !== "number" || !playerId) return false;
+  const tile = getMortgageableTile(tileId);
+  if (!tile) return false;
+  const player = findPlayerById(state, playerId);
+  if (!player || player.bankrupt) return false;
+  const debtOverride = state.debtContext?.active && getCurrentPlayer(state)?.id === playerId;
+  if (!isPlayersTurn(state, playerId) && !debtOverride) return false;
+  if (state.tileOwnership[tileId] !== playerId) return false;
+  if (state.mortgages?.[tileId]) return false;
+  if (tile.type === "property") {
+    const houses = state.structures?.[tileId] ?? 0;
+    if (houses > 0) return false;
+    if (groupHasHouses(state, tile.group)) return false;
+  }
+  return true;
+}
+
+export function canUnmortgageHere(state, playerId, tileId) {
+  if (typeof tileId !== "number" || !playerId) return false;
+  const tile = getMortgageableTile(tileId);
+  if (!tile) return false;
+  const player = findPlayerById(state, playerId);
+  if (!player || player.bankrupt) return false;
+  const debtOverride = state.debtContext?.active && getCurrentPlayer(state)?.id === playerId;
+  if (!isPlayersTurn(state, playerId) && !debtOverride) return false;
+  if (state.tileOwnership[tileId] !== playerId) return false;
+  if (!state.mortgages?.[tileId]) return false;
+  const cost = getUnmortgageCost(tile);
+  if (player.cash < cost) return false;
+  return true;
+}
+
+function isPlayersTurn(state, playerId) {
+  const current = getCurrentPlayer(state);
+  return current ? current.id === playerId : false;
+}
+
+function isBuildSellPhase(state) {
+  if (state.debtContext?.active) return true;
+  if (state.turn.mustEnd) return false;
+  return state.turn.phase === "idle" || state.turn.phase === "resolved";
+}
+
+function wouldKeepEven(state, tileId, delta) {
+  const current = state.structures?.[tileId] ?? 0;
+  const nextCount = current + delta;
+  if (nextCount < 0 || nextCount > 5) return false;
+
+  const tile = BOARD_TILES.find((t) => t.id === tileId && t.type === "property");
+  if (!tile || !tile.group) return false;
+  const groupTiles = BOARD_TILES.filter((t) => t.type === "property" && t.group === tile.group);
+  if (!groupTiles.length) return false;
+
+  const counts = groupTiles.map((groupTile) => {
+    if (groupTile.id === tileId) {
+      return nextCount;
+    }
+    return state.structures?.[groupTile.id] ?? 0;
+  });
+  const max = Math.max(...counts);
+  const min = Math.min(...counts);
+  return max - min <= 1;
+}
+
+function getGroupProperties(group) {
+  if (!group) return [];
+  return BOARD_TILES.filter((tile) => tile.type === "property" && tile.group === group);
+}
+
+function groupHasMortgaged(state, group) {
+  if (!group) return false;
+  if (!state.mortgages) return false;
+  return getGroupProperties(group).some((tile) => Boolean(state.mortgages[tile.id]));
+}
+
+function groupHasHouses(state, group) {
+  if (!group) return false;
+  if (!state.structures) return false;
+  return getGroupProperties(group).some((tile) => (state.structures[tile.id] ?? 0) > 0);
+}
+
+function getMortgageableTile(tileId) {
+  return BOARD_TILES.find((tile) =>
+    tile.id === tileId && (tile.type === "property" || tile.type === "rail" || tile.type === "utility")
+  );
+}
+
+function getUnmortgageCost(tile) {
+  return Math.ceil((tile.mortgage || 0) * (1 + MORTGAGE_INTEREST_RATE));
+}
+
 function pushLog(state, message) {
   const entry = {
     id: ++state.meta.logCounter,
@@ -812,6 +1323,287 @@ function createEmptyOwnership() {
   return ownership;
 }
 
+function createEmptyStructures() {
+  const houses = {};
+  BOARD_TILES.forEach((tile) => {
+    if (tile.type === "property") {
+      houses[tile.id] = 0;
+    }
+  });
+  return houses;
+}
+
+function createEmptyMortgages() {
+  const mortgages = {};
+  BOARD_TILES.forEach((tile) => {
+    if (tile.type === "property" || tile.type === "rail" || tile.type === "utility") {
+      mortgages[tile.id] = false;
+    }
+  });
+  return mortgages;
+}
+
+function ensureStructures(state) {
+  if (!state.structures) {
+    state.structures = createEmptyStructures();
+  }
+  return state.structures;
+}
+
+function ensureMortgages(state) {
+  if (!state.mortgages) {
+    state.mortgages = createEmptyMortgages();
+  }
+  return state.mortgages;
+}
+
+function applyMortgage(state, player, tile) {
+  const mortgages = ensureMortgages(state);
+  mortgages[tile.id] = true;
+  player.cash += tile.mortgage;
+  pushLog(state, `${player.name} mortgages ${tile.name} for $${tile.mortgage}.`);
+}
+
+function applyUnmortgage(state, player, tile) {
+  const mortgages = ensureMortgages(state);
+  const cost = getUnmortgageCost(tile);
+  player.cash -= cost;
+  mortgages[tile.id] = false;
+  pushLog(state, `${player.name} unmortgages ${tile.name} by paying $${cost}.`);
+}
+
+function ensureDebtContext(state) {
+  if (!state.debtContext) {
+    state.debtContext = {
+      active: false,
+      amountOwed: 0,
+      creditor: null,
+    };
+  }
+  return state.debtContext;
+}
+
+function activateDebtContext(state, player, creditor = "bank") {
+  const debt = ensureDebtContext(state);
+  const amount = Math.max(0, -player.cash);
+  if (amount <= 0) {
+    return;
+  }
+  debt.active = true;
+  debt.amountOwed = Math.max(debt.amountOwed || 0, amount);
+  debt.creditor = creditor;
+  state.turn.debtLocked = true;
+}
+
+function updateDebtAfterAction(state, player) {
+  const debt = ensureDebtContext(state);
+  if (!debt.active) {
+    return;
+  }
+  const remaining = Math.max(0, -player.cash);
+  debt.amountOwed = remaining;
+  if (remaining <= 0) {
+    debt.active = false;
+    debt.amountOwed = 0;
+    debt.creditor = null;
+    state.turn.debtLocked = false;
+  }
+}
+
+function removeOwnedProperty(player, tileId) {
+  const index = player.owned.indexOf(tileId);
+  if (index >= 0) {
+    player.owned.splice(index, 1);
+  }
+}
+
+function addOwnedProperty(player, tileId) {
+  if (!player.owned.includes(tileId)) {
+    player.owned.push(tileId);
+  }
+}
+
+function transferPropertyOwnership(state, fromPlayer, toPlayer, tileId) {
+  state.tileOwnership[tileId] = toPlayer ? toPlayer.id : null;
+  if (fromPlayer) {
+    removeOwnedProperty(fromPlayer, tileId);
+  }
+  if (toPlayer) {
+    addOwnedProperty(toPlayer, tileId);
+  }
+}
+
+function createTradeId(state) {
+  if (!state.meta) {
+    state.meta = {};
+  }
+  state.meta.tradeCounter = (state.meta.tradeCounter || 0) + 1;
+  return `trade-${state.meta.tradeCounter}`;
+}
+
+function normalizeTradeSide(state, ownerId, side) {
+  const result = {
+    cash: 0,
+    properties: [],
+  };
+  if (!side) return result;
+  const cashValue = Number(side.cash);
+  if (Number.isFinite(cashValue) && cashValue > 0) {
+    result.cash = Math.max(0, Math.floor(cashValue));
+  }
+  const props = Array.isArray(side.properties) ? side.properties : [];
+  const unique = new Set();
+  props.forEach((value) => {
+    const tileId = typeof value === "number" ? value : parseInt(value, 10);
+    if (!Number.isInteger(tileId)) return;
+    if (state.tileOwnership?.[tileId] !== ownerId) return;
+    const tile = getMortgageableTile(tileId);
+    if (!tile) return;
+    unique.add(tileId);
+  });
+  result.properties = Array.from(unique.values());
+  return result;
+}
+
+function describeTradeSide(state, side) {
+  const parts = [];
+  if (side.cash > 0) {
+    parts.push(`$${side.cash}`);
+  }
+  if (side.properties.length) {
+    const names = side.properties.map((tileId) => getTileName(tileId));
+    parts.push(names.join(", "));
+  }
+  if (!parts.length) {
+    return "nothing";
+  }
+  return parts.join(" + ");
+}
+
+function getTileName(tileId) {
+  const tile = BOARD_TILES.find((t) => t.id === tileId);
+  return tile ? tile.name : `Tile ${tileId}`;
+}
+
+function attemptAutoSellHouse(state, player) {
+  ensureStructures(state);
+  const ownedProperties = player.owned
+    .map((id) => BOARD_TILES.find((tile) => tile.id === id && tile.type === "property"))
+    .filter(Boolean)
+    .sort((a, b) => {
+      const housesA = state.structures[a.id] ?? 0;
+      const housesB = state.structures[b.id] ?? 0;
+      if (housesA !== housesB) return housesB - housesA;
+      return (b.mortgage || 0) - (a.mortgage || 0);
+    });
+
+  for (const tile of ownedProperties) {
+    const houses = state.structures[tile.id] ?? 0;
+    if (houses <= 0) continue;
+    if (!canSellHere(state, player.id, tile.id)) continue;
+    const refund = Math.floor(tile.houseCost / 2);
+    state.structures[tile.id] = houses - 1;
+    player.cash += refund;
+    pushLog(state, `${player.name} auto-sells a house on ${tile.name} (+$${refund}).`);
+    return true;
+  }
+  return false;
+}
+
+function attemptAutoMortgage(state, player) {
+  ensureMortgages(state);
+  const candidates = player.owned
+    .map((id) => getMortgageableTile(id))
+    .filter((tile) => tile && !state.mortgages?.[tile.id])
+    .sort((a, b) => (b.mortgage || 0) - (a.mortgage || 0));
+
+  for (const tile of candidates) {
+    if (!canMortgageHere(state, player.id, tile.id)) continue;
+    applyMortgage(state, player, tile);
+    return true;
+  }
+  return false;
+}
+
+function autoLiquidate(state) {
+  const player = getCurrentPlayer(state);
+  if (!player || player.bankrupt) return;
+  ensureStructures(state);
+  ensureMortgages(state);
+
+  let changed = true;
+  while (player.cash < 0 && changed) {
+    changed = false;
+    if (attemptAutoSellHouse(state, player)) {
+      changed = true;
+      continue;
+    }
+    if (attemptAutoMortgage(state, player)) {
+      changed = true;
+    }
+  }
+
+  updateDebtAfterAction(state, player);
+}
+
+function clearDebtContext(state) {
+  ensureDebtContext(state);
+  state.debtContext.active = false;
+  state.debtContext.amountOwed = 0;
+  state.debtContext.creditor = null;
+  state.turn.debtLocked = false;
+}
+
+function finalizeBankruptcy(state, player, creditorId = "bank") {
+  if (!player || player.bankrupt) return;
+  ensureStructures(state);
+  ensureMortgages(state);
+
+  const ownedTiles = [...player.owned];
+  ownedTiles.forEach((tileId) => {
+    const tile = BOARD_TILES.find((t) => t.id === tileId && t.type === "property");
+    if (!tile) return;
+    const houses = state.structures[tileId] ?? 0;
+    if (houses > 0) {
+      const refund = houses * Math.floor(tile.houseCost / 2);
+      if (refund > 0) {
+        player.cash += refund;
+        pushLog(state, `${player.name} liquidates structures on ${tile.name} (+$${refund}).`);
+      }
+      state.structures[tileId] = 0;
+    }
+  });
+
+  const creditor = creditorId && creditorId !== "bank" ? findPlayerById(state, creditorId) : null;
+
+  if (creditor) {
+    ownedTiles.forEach((tileId) => {
+      transferPropertyOwnership(state, player, creditor, tileId);
+    });
+    const payment = Math.max(0, player.cash);
+    if (payment > 0) {
+      creditor.cash += payment;
+    }
+    player.cash = 0;
+    pushLog(state, `${player.name} declares bankruptcy to ${creditor.name}. Assets transfer to creditor.`);
+  } else {
+    releaseProperties(state, player.id);
+    pushLog(state, `${player.name} declares bankruptcy to the bank. Assets return to the bank.`);
+    player.cash = 0;
+  }
+
+  clearDebtContext(state);
+  state.pendingTrade = null;
+
+  player.bankrupt = true;
+  player.position = -1;
+  player.inJail = false;
+  player.jailTurns = 0;
+  releaseHeldCards(state, player);
+  state.turn.mustEnd = true;
+  determineWinner(state);
+}
+
 function createInitialTurn() {
   return {
     currentIndex: 0,
@@ -824,6 +1616,7 @@ function createInitialTurn() {
     pendingCard: null,
     allowExtraRoll: false,
     mustEnd: false,
+    debtLocked: false,
   };
 }
 

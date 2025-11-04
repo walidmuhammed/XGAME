@@ -30,11 +30,32 @@
             <button id="end-btn" class="secondary" disabled>End Turn</button>
             <button id="pay-bail-btn" class="secondary" disabled>Pay Bail</button>
             <button id="use-card-btn" class="secondary" disabled>Use Get Out of Jail</button>
+            <button id="build-btn" class="secondary hidden" disabled>Build +</button>
+            <button id="sell-btn" class="secondary hidden" disabled>Sell −</button>
+            <button id="trade-btn" class="secondary" disabled>Trade</button>
           </div>
         </div>
         <div class="panel-section">
           <h2>Property</h2>
+          <div id="structure-icons" class="structure-icons">—</div>
+          <div id="structure-info" class="structure-info"></div>
+          <div class="finance-panel" id="finance-panel">
+            <div class="finance-title">Finance</div>
+            <div class="finance-actions">
+              <button id="mortgage-btn" class="secondary" disabled>Mortgage</button>
+              <button id="unmortgage-btn" class="secondary" disabled>Unmortgage</button>
+            </div>
+          </div>
           <div id="tile-detail">Select a tile</div>
+        </div>
+        <div class="panel-section">
+          <h2>Rules</h2>
+          <div class="rule-toggle">
+            <label for="even-build-toggle">
+              <input type="checkbox" id="even-build-toggle" checked>
+              Even-Build Rule: <span id="even-build-status">ON</span>
+            </label>
+          </div>
         </div>
         <div class="panel-section">
           <h2>Players</h2>
@@ -53,6 +74,64 @@
       <h2 id="card-title">Card</h2>
       <p id="card-text"></p>
       <button id="card-ok-btn" class="primary">OK</button>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="trade-modal" aria-hidden="true" role="dialog">
+    <div class="modal-content wide">
+      <h2>Trade Builder</h2>
+      <div class="trade-header">
+        <label for="trade-partner-select">Partner</label>
+        <select id="trade-partner-select"></select>
+        <span id="trade-status" class="trade-status"></span>
+      </div>
+      <div class="trade-columns">
+        <div class="trade-column" id="trade-offer-column">
+          <h3>You Give</h3>
+          <div class="trade-props" id="trade-offer-properties"></div>
+          <label for="trade-offer-cash" class="trade-cash-label">Cash Offer</label>
+          <input type="number" id="trade-offer-cash" min="0" value="0">
+        </div>
+        <div class="trade-column" id="trade-request-column">
+          <h3>Partner Gives</h3>
+          <div class="trade-props" id="trade-request-properties"></div>
+          <label for="trade-request-cash" class="trade-cash-label">Cash Request</label>
+          <input type="number" id="trade-request-cash" min="0" value="0">
+        </div>
+      </div>
+      <div class="trade-actions">
+        <button id="trade-propose-btn" class="primary">Propose</button>
+        <button id="trade-counter-btn" class="secondary">Counter</button>
+        <button id="trade-accept-btn" class="primary">Accept</button>
+        <button id="trade-decline-btn" class="secondary">Decline</button>
+        <button id="trade-cancel-btn" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="debt-modal" aria-hidden="true" role="dialog">
+    <div class="modal-content wide">
+      <h2>Resolve Debt</h2>
+      <p id="debt-summary" class="debt-summary"></p>
+      <div class="debt-sections">
+        <div class="debt-section">
+          <h3>Sell Houses</h3>
+          <div id="debt-sell-list" class="debt-list"></div>
+        </div>
+        <div class="debt-section">
+          <h3>Mortgage / Unmortgage</h3>
+          <div id="debt-mortgage-list" class="debt-list"></div>
+        </div>
+        <div class="debt-section">
+          <h3>Trades</h3>
+          <div id="debt-trade-list" class="debt-list"></div>
+        </div>
+      </div>
+      <div class="debt-footer">
+        <button id="debt-auto-btn" class="secondary">Auto-Liquidate</button>
+        <button id="debt-done-btn" class="primary">Done</button>
+        <button id="debt-surrender-btn" class="secondary">Surrender</button>
+      </div>
     </div>
   </div>
 

@@ -9,7 +9,9 @@ const SLOT_OFFSETS = [
   [14, 14],
   [-14, 14],
   [14, -14],
-  [0, -22],
+  [0, -24],
+  [-18, 18],
+  [18, -18],
 ];
 
 const GROUP_COLORS = {
@@ -37,68 +39,399 @@ const TYPE_COLORS = {
 };
 
 export const BOARD_TILES = [
-  { id: 0, name: "Start", type: "start", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 1, name: "Coral Crossing", type: "property", group: "coral", price: 60, baseRent: 6, rent: [6], tax: 0 },
-  { id: 2, name: "Community Chest", type: "treasure", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 3, name: "Coral Plaza", type: "property", group: "coral", price: 60, baseRent: 8, rent: [8], tax: 0 },
-  { id: 4, name: "Income Tax", type: "tax", group: null, price: 0, baseRent: 0, rent: [], tax: 100 },
-  { id: 5, name: "Harbor Line", type: "rail", group: null, price: 200, baseRent: 25, rent: [25, 50, 100, 200], tax: 0 },
-  { id: 6, name: "Amber Alley", type: "property", group: "amber", price: 100, baseRent: 10, rent: [10], tax: 0 },
-  { id: 7, name: "Surprise", type: "surprise", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 8, name: "Amber Arcade", type: "property", group: "amber", price: 100, baseRent: 12, rent: [12], tax: 0 },
-  { id: 9, name: "Amber Heights", type: "property", group: "amber", price: 120, baseRent: 14, rent: [14], tax: 0 },
-  { id: 10, name: "Jail", type: "jail", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 11, name: "Verdant View", type: "property", group: "verdant", price: 140, baseRent: 16, rent: [16], tax: 0 },
-  { id: 12, name: "Riverworks Utility", type: "utility", group: null, price: 150, baseRent: 4, rent: [4, 10], tax: 0 },
-  { id: 13, name: "Verdant Grove", type: "property", group: "verdant", price: 140, baseRent: 18, rent: [18], tax: 0 },
-  { id: 14, name: "Verdant Square", type: "property", group: "verdant", price: 160, baseRent: 20, rent: [20], tax: 0 },
-  { id: 15, name: "Central Station", type: "rail", group: null, price: 200, baseRent: 25, rent: [25, 50, 100, 200], tax: 0 },
-  { id: 16, name: "Azure Avenue", type: "property", group: "azure", price: 180, baseRent: 22, rent: [22], tax: 0 },
-  { id: 17, name: "Treasure", type: "treasure", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 18, name: "Azure Promenade", type: "property", group: "azure", price: 180, baseRent: 22, rent: [22], tax: 0 },
-  { id: 19, name: "Azure Terrace", type: "property", group: "azure", price: 200, baseRent: 24, rent: [24], tax: 0 },
-  { id: 20, name: "Free Park", type: "free", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 21, name: "Sunset Street", type: "property", group: "sunset", price: 220, baseRent: 26, rent: [26], tax: 0 },
-  { id: 22, name: "Surprise", type: "surprise", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 23, name: "Sunset Market", type: "property", group: "sunset", price: 220, baseRent: 26, rent: [26], tax: 0 },
-  { id: 24, name: "Sunset Plaza", type: "property", group: "sunset", price: 240, baseRent: 28, rent: [28], tax: 0 },
-  { id: 25, name: "Skyline Express", type: "rail", group: null, price: 200, baseRent: 25, rent: [25, 50, 100, 200], tax: 0 },
-  { id: 26, name: "Crimson Row", type: "property", group: "crimson", price: 260, baseRent: 30, rent: [30], tax: 0 },
-  { id: 27, name: "Crimson Court", type: "property", group: "crimson", price: 260, baseRent: 32, rent: [32], tax: 0 },
-  { id: 28, name: "Gridline Utility", type: "utility", group: null, price: 150, baseRent: 4, rent: [4, 10], tax: 0 },
-  { id: 29, name: "Crimson Point", type: "property", group: "crimson", price: 280, baseRent: 34, rent: [34], tax: 0 },
-  { id: 30, name: "Go To Jail", type: "gotojail", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 31, name: "Indigo Lane", type: "property", group: "indigo", price: 300, baseRent: 36, rent: [36], tax: 0 },
-  { id: 32, name: "Indigo Ridge", type: "property", group: "indigo", price: 300, baseRent: 38, rent: [38], tax: 0 },
-  { id: 33, name: "Treasure", type: "treasure", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 34, name: "Indigo Square", type: "property", group: "indigo", price: 320, baseRent: 42, rent: [42], tax: 0 },
-  { id: 35, name: "Metro Loop", type: "rail", group: null, price: 200, baseRent: 25, rent: [25, 50, 100, 200], tax: 0 },
-  { id: 36, name: "Surprise", type: "surprise", group: null, price: 0, baseRent: 0, rent: [], tax: 0 },
-  { id: 37, name: "Aurora Way", type: "property", group: "aurora", price: 350, baseRent: 45, rent: [45], tax: 0 },
-  { id: 38, name: "Luxury Tax", type: "tax", group: null, price: 0, baseRent: 0, rent: [], tax: 120 },
-  { id: 39, name: "Aurora Plaza", type: "property", group: "aurora", price: 400, baseRent: 50, rent: [50], tax: 0 },
+  { id: 0, name: "Start", type: "start", group: null, price: 0 },
+  {
+    id: 1,
+    name: "Coral Crossing",
+    type: "property",
+    group: "coral",
+    price: 60,
+    houseCost: 50,
+    rents: [2, 10, 30, 90, 160, 250],
+    mortgage: 30,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 2, name: "Community Chest", type: "treasure", group: null, price: 0 },
+  {
+    id: 3,
+    name: "Coral Plaza",
+    type: "property",
+    group: "coral",
+    price: 60,
+    houseCost: 50,
+    rents: [4, 20, 60, 180, 320, 450],
+    mortgage: 30,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 4, name: "Income Tax", type: "tax", group: null, price: 0, tax: 100 },
+  {
+    id: 5,
+    name: "Harbor Line",
+    type: "rail",
+    group: null,
+    price: 200,
+    rent: [25, 50, 100, 200],
+    mortgage: 100,
+    mortgaged: false,
+  },
+  {
+    id: 6,
+    name: "Amber Alley",
+    type: "property",
+    group: "amber",
+    price: 100,
+    houseCost: 50,
+    rents: [6, 30, 90, 270, 400, 550],
+    mortgage: 50,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 7, name: "Surprise", type: "surprise", group: null, price: 0 },
+  {
+    id: 8,
+    name: "Amber Arcade",
+    type: "property",
+    group: "amber",
+    price: 100,
+    houseCost: 50,
+    rents: [6, 30, 90, 270, 400, 550],
+    mortgage: 50,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 9,
+    name: "Amber Heights",
+    type: "property",
+    group: "amber",
+    price: 120,
+    houseCost: 50,
+    rents: [8, 40, 100, 300, 450, 600],
+    mortgage: 60,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 10, name: "Jail", type: "jail", group: null, price: 0 },
+  {
+    id: 11,
+    name: "Verdant View",
+    type: "property",
+    group: "verdant",
+    price: 140,
+    houseCost: 100,
+    rents: [10, 50, 150, 450, 650, 750],
+    mortgage: 70,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 12,
+    name: "Riverworks Utility",
+    type: "utility",
+    group: null,
+    price: 150,
+    rent: [4, 10],
+    mortgage: 75,
+    mortgaged: false,
+  },
+  {
+    id: 13,
+    name: "Verdant Grove",
+    type: "property",
+    group: "verdant",
+    price: 140,
+    houseCost: 100,
+    rents: [12, 60, 180, 500, 700, 900],
+    mortgage: 70,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 14,
+    name: "Verdant Square",
+    type: "property",
+    group: "verdant",
+    price: 160,
+    houseCost: 100,
+    rents: [14, 70, 200, 550, 750, 950],
+    mortgage: 80,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 15,
+    name: "Central Station",
+    type: "rail",
+    group: null,
+    price: 200,
+    rent: [25, 50, 100, 200],
+    mortgage: 100,
+    mortgaged: false,
+  },
+  {
+    id: 16,
+    name: "Azure Avenue",
+    type: "property",
+    group: "azure",
+    price: 180,
+    houseCost: 100,
+    rents: [18, 90, 250, 700, 875, 1050],
+    mortgage: 90,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 17, name: "Treasure", type: "treasure", group: null, price: 0 },
+  {
+    id: 18,
+    name: "Azure Promenade",
+    type: "property",
+    group: "azure",
+    price: 180,
+    houseCost: 100,
+    rents: [18, 90, 250, 700, 875, 1050],
+    mortgage: 90,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 19,
+    name: "Azure Terrace",
+    type: "property",
+    group: "azure",
+    price: 200,
+    houseCost: 100,
+    rents: [20, 100, 300, 750, 925, 1100],
+    mortgage: 100,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 20, name: "Free Park", type: "free", group: null, price: 0 },
+  {
+    id: 21,
+    name: "Sunset Street",
+    type: "property",
+    group: "sunset",
+    price: 220,
+    houseCost: 150,
+    rents: [22, 110, 330, 800, 975, 1150],
+    mortgage: 110,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 22, name: "Surprise", type: "surprise", group: null, price: 0 },
+  {
+    id: 23,
+    name: "Sunset Market",
+    type: "property",
+    group: "sunset",
+    price: 220,
+    houseCost: 150,
+    rents: [22, 110, 330, 800, 975, 1150],
+    mortgage: 110,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 24,
+    name: "Sunset Plaza",
+    type: "property",
+    group: "sunset",
+    price: 240,
+    houseCost: 150,
+    rents: [24, 120, 360, 850, 1025, 1200],
+    mortgage: 120,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 25,
+    name: "Skyline Express",
+    type: "rail",
+    group: null,
+    price: 200,
+    rent: [25, 50, 100, 200],
+  },
+  {
+    id: 26,
+    name: "Crimson Row",
+    type: "property",
+    group: "crimson",
+    price: 260,
+    houseCost: 150,
+    rents: [26, 130, 390, 900, 1100, 1275],
+    mortgage: 130,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 27,
+    name: "Crimson Court",
+    type: "property",
+    group: "crimson",
+    price: 260,
+    houseCost: 150,
+    rents: [26, 130, 390, 900, 1100, 1275],
+    mortgage: 130,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 28,
+    name: "Gridline Utility",
+    type: "utility",
+    group: null,
+    price: 150,
+    rent: [4, 10],
+  },
+  {
+    id: 29,
+    name: "Crimson Point",
+    type: "property",
+    group: "crimson",
+    price: 280,
+    houseCost: 150,
+    rents: [28, 150, 420, 950, 1150, 1400],
+    mortgage: 140,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 30, name: "Go To Jail", type: "gotojail", group: null, price: 0 },
+  {
+    id: 31,
+    name: "Indigo Lane",
+    type: "property",
+    group: "indigo",
+    price: 300,
+    houseCost: 150,
+    rents: [35, 175, 500, 1100, 1300, 1500],
+    mortgage: 150,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 32,
+    name: "Indigo Ridge",
+    type: "property",
+    group: "indigo",
+    price: 300,
+    houseCost: 150,
+    rents: [35, 175, 500, 1100, 1300, 1500],
+    mortgage: 150,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  { id: 33, name: "Treasure", type: "treasure", group: null, price: 0 },
+  {
+    id: 34,
+    name: "Indigo Square",
+    type: "property",
+    group: "indigo",
+    price: 320,
+    houseCost: 150,
+    rents: [40, 200, 550, 1200, 1400, 1600],
+    mortgage: 160,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 35,
+    name: "Metro Loop",
+    type: "rail",
+    group: null,
+    price: 200,
+    rent: [25, 50, 100, 200],
+    mortgage: 100,
+    mortgaged: false,
+  },
+  { id: 36, name: "Surprise", type: "surprise", group: null, price: 0 },
+  {
+    id: 37,
+    name: "Aurora Way",
+    type: "property",
+    group: "aurora",
+    price: 350,
+    houseCost: 200,
+    rents: [50, 200, 600, 1400, 1700, 2000],
+    mortgage: 175,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
+  {
+    id: 38,
+    name: "Luxury Tax",
+    type: "tax",
+    group: null,
+    price: 0,
+    tax: 120,
+  },
+  {
+    id: 39,
+    name: "Aurora Plaza",
+    type: "property",
+    group: "aurora",
+    price: 400,
+    houseCost: 200,
+    rents: [75, 350, 900, 1700, 2000, 2300],
+    mortgage: 200,
+    mortgaged: false,
+    ownerId: null,
+    houses: 0,
+  },
 ];
 
 const boardState = {
   svg: null,
   tiles: [],
   tileCenters: [],
+  tileRects: [],
   tileGroups: [],
   ownerMarkers: new Map(),
-  tokenLayer: null,
+  structureGroups: new Map(),
+  mortgageBadges: new Map(),
+  baseRects: new Map(),
+  baseFills: new Map(),
   tokens: new Map(),
   playerColors: new Map(),
   selectedTile: null,
   selectHandler: null,
+  tokenLayer: null,
 };
 
 export function createBoard(svgEl, tiles = BOARD_TILES) {
   boardState.svg = svgEl;
   boardState.tiles = tiles;
   boardState.ownerMarkers.clear();
+  boardState.structureGroups.clear();
+  boardState.mortgageBadges.clear();
+  boardState.baseRects.clear();
+  boardState.baseFills.clear();
   boardState.playerColors.clear();
   boardState.tokens.clear();
   boardState.tileCenters = [];
+  boardState.tileRects = [];
   boardState.tileGroups = [];
   boardState.selectedTile = null;
   boardState.selectHandler = null;
@@ -122,6 +455,7 @@ export function createBoard(svgEl, tiles = BOARD_TILES) {
     tileLayer.appendChild(tileGroup);
     boardState.tileGroups[index] = tileGroup;
     boardState.tileCenters[index] = tileRect.center;
+    boardState.tileRects[index] = tileRect;
   });
 
   return {
@@ -129,6 +463,8 @@ export function createBoard(svgEl, tiles = BOARD_TILES) {
     getTileCenter,
     setSelectedTile,
     updateOwnership,
+    updateStructures,
+    updateMortgages,
     onTileSelect,
   };
 }
@@ -198,6 +534,65 @@ export function updateOwnership(ownership = {}) {
   });
 }
 
+export function updateStructures(structures = {}) {
+  ensureBoard();
+  boardState.tiles.forEach((tile) => {
+    if (tile.type !== "property") return;
+    const houses = structures[tile.id] ?? 0;
+    drawStructuresForTile(tile.id, houses);
+  });
+}
+
+export function updateMortgages(mortgages = {}) {
+  ensureBoard();
+  boardState.tiles.forEach((tile, index) => {
+    if (tile.type !== "property" && tile.type !== "rail" && tile.type !== "utility") return;
+    const badge = boardState.mortgageBadges.get(index);
+    const baseRect = boardState.baseRects.get(index);
+    const baseFill = boardState.baseFills.get(index);
+    if (!badge || !baseRect) return;
+    const mortgaged = Boolean(mortgages[tile.id] ?? mortgages[String(tile.id)]);
+    badge.setAttribute("opacity", mortgaged ? "1" : "0");
+    baseRect.setAttribute("fill", mortgaged ? "#dfe6e9" : baseFill);
+  });
+}
+
+export function drawStructuresForTile(tileId, houses = 0) {
+  ensureBoard();
+  const entry = boardState.structureGroups.get(tileId);
+  if (!entry) return;
+  const { group, rect } = entry;
+  while (group.firstChild) {
+    group.removeChild(group.firstChild);
+  }
+
+  if (houses <= 0) return;
+
+  if (houses >= 5) {
+    const hotel = document.createElementNS(SVG_NS, "rect");
+    hotel.classList.add("hotel-marker");
+    const { x, y, width, height } = computeStructureContainer(rect);
+    const size = Math.min(width, height);
+    hotel.setAttribute("x", x + (width - size) / 2);
+    hotel.setAttribute("y", y + (height - size) / 2);
+    hotel.setAttribute("width", size);
+    hotel.setAttribute("height", size);
+    group.appendChild(hotel);
+    return;
+  }
+
+  const positions = computeHousePositions(rect, houses);
+  positions.forEach((pos) => {
+    const marker = document.createElementNS(SVG_NS, "rect");
+    marker.classList.add("house-marker");
+    marker.setAttribute("x", pos.x);
+    marker.setAttribute("y", pos.y);
+    marker.setAttribute("width", pos.width);
+    marker.setAttribute("height", pos.height);
+    group.appendChild(marker);
+  });
+}
+
 export function setSelectedTile(tileId) {
   ensureBoard();
   if (boardState.selectedTile !== null && boardState.tileGroups[boardState.selectedTile]) {
@@ -216,6 +611,10 @@ export function onTileSelect(handler) {
 export function getTileCenter(tileId) {
   ensureBoard();
   return boardState.tileCenters[tileId];
+}
+
+export function getGroupTiles(tiles, group) {
+  return tiles.filter((tile) => tile.type === "property" && tile.group === group);
 }
 
 function ensureBoard() {
@@ -240,7 +639,7 @@ function relayoutTokens() {
     playerIds.forEach((pid, idx) => {
       const token = boardState.tokens.get(pid);
       if (!token) return;
-      const offset = SLOT_OFFSETS[idx] || SLOT_OFFSETS[SLOT_OFFSETS.length - 1];
+      const offset = SLOT_OFFSETS[Math.min(idx, SLOT_OFFSETS.length - 1)];
       const x = center.x + offset[0];
       const y = center.y + offset[1];
       token.group.setAttribute("transform", `translate(${x}, ${y})`);
@@ -326,11 +725,13 @@ function buildTileElement(tile, rect, index) {
   base.setAttribute("stroke", "#2c3e50");
   base.setAttribute("stroke-width", "1.5");
   group.appendChild(base);
+  boardState.baseRects.set(index, base);
+  boardState.baseFills.set(index, TYPE_COLORS[tile.type] || TYPE_COLORS.property);
 
   if (tile.type === "property" && tile.group) {
     const band = document.createElementNS(SVG_NS, "rect");
     const bandColor = GROUP_COLORS[tile.group] || "#ccc";
-    const bandThickness = 18;
+    const bandThickness = 20;
     if (rect.orientation === "bottom" || rect.orientation === "corner-bottom") {
       band.setAttribute("x", rect.x);
       band.setAttribute("y", rect.y);
@@ -355,6 +756,15 @@ function buildTileElement(tile, rect, index) {
     band.setAttribute("fill", bandColor);
     group.appendChild(band);
   }
+
+  const structures = document.createElementNS(SVG_NS, "g");
+  structures.classList.add("tile-structures");
+  group.appendChild(structures);
+  boardState.structureGroups.set(index, { group: structures, rect });
+
+  const mortgageBadge = createMortgageBadge(rect);
+  group.appendChild(mortgageBadge);
+  boardState.mortgageBadges.set(index, mortgageBadge);
 
   const label = document.createElementNS(SVG_NS, "text");
   label.classList.add("tile-label");
@@ -461,6 +871,40 @@ function createOwnerMarker(rect) {
   return marker;
 }
 
+function createMortgageBadge(rect) {
+  const badge = document.createElementNS(SVG_NS, "g");
+  badge.classList.add("tile-mortgage-badge");
+  badge.style.pointerEvents = "none";
+  const size = 18;
+  const badgeX = rect.x + rect.width - size - 6;
+  const badgeY = rect.y + 6;
+
+  const shape = document.createElementNS(SVG_NS, "rect");
+  shape.setAttribute("x", badgeX);
+  shape.setAttribute("y", badgeY);
+  shape.setAttribute("width", size);
+  shape.setAttribute("height", size);
+  shape.setAttribute("rx", 4);
+  shape.setAttribute("ry", 4);
+  shape.setAttribute("fill", "#8e44ad");
+  shape.setAttribute("stroke", "#ffffff");
+  shape.setAttribute("stroke-width", "1.2");
+  badge.appendChild(shape);
+
+  const text = document.createElementNS(SVG_NS, "text");
+  text.setAttribute("x", badgeX + size / 2);
+  text.setAttribute("y", badgeY + size / 2 + 0.5);
+  text.setAttribute("text-anchor", "middle");
+  text.setAttribute("dominant-baseline", "middle");
+  text.setAttribute("fill", "#ffffff");
+  text.setAttribute("font-size", "11");
+  text.textContent = "M";
+  badge.appendChild(text);
+
+  badge.setAttribute("opacity", "0");
+  return badge;
+}
+
 function ownerMarkerPosition(rect) {
   const margin = 20;
   if (rect.orientation === "bottom") {
@@ -476,6 +920,83 @@ function ownerMarkerPosition(rect) {
     return { x: rect.x + margin, y: rect.y + rect.height / 2 };
   }
   return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+}
+
+function computeStructureContainer(rect) {
+  const padding = 26;
+  if (rect.orientation === "bottom") {
+    return {
+      x: rect.x + 12,
+      y: rect.y + padding,
+      width: rect.width - 24,
+      height: rect.height - padding - 12,
+    };
+  }
+  if (rect.orientation === "top") {
+    return {
+      x: rect.x + 12,
+      y: rect.y + 12,
+      width: rect.width - 24,
+      height: rect.height - padding - 12,
+    };
+  }
+  if (rect.orientation === "left") {
+    return {
+      x: rect.x + padding,
+      y: rect.y + 12,
+      width: rect.width - padding - 12,
+      height: rect.height - 24,
+    };
+  }
+  if (rect.orientation === "right") {
+    return {
+      x: rect.x + 12,
+      y: rect.y + 12,
+      width: rect.width - padding - 12,
+      height: rect.height - 24,
+    };
+  }
+  return {
+    x: rect.x + 16,
+    y: rect.y + 16,
+    width: rect.width - 32,
+    height: rect.height - 32,
+  };
+}
+
+function computeHousePositions(rect, count) {
+  const container = computeStructureContainer(rect);
+  const positions = [];
+  const slotCount = 4;
+  const horizontal = rect.orientation === "bottom" || rect.orientation === "top" || rect.orientation.includes("corner");
+
+  if (horizontal) {
+    const markerWidth = Math.min(24, container.width / slotCount - 6);
+    const markerHeight = 14;
+    const gap = (container.width - markerWidth * slotCount) / (slotCount - 1 || 1);
+    for (let i = 0; i < count; i += 1) {
+      positions.push({
+        x: container.x + i * (markerWidth + gap),
+        y: rect.orientation === "bottom" ? container.y + container.height - markerHeight - 4 : container.y + 4,
+        width: markerWidth,
+        height: markerHeight,
+      });
+    }
+  } else {
+    const markerHeight = Math.min(24, container.height / slotCount - 6);
+    const markerWidth = 14;
+    const gap = (container.height - markerHeight * slotCount) / (slotCount - 1 || 1);
+    for (let i = 0; i < count; i += 1) {
+      positions.push({
+        x: rect.orientation === "left" ? container.x + container.width - markerWidth - 4 : container.x + 4,
+        y: container.y + i * (markerHeight + gap),
+        width: markerWidth,
+        height: markerHeight,
+      });
+    }
+  }
+
+  return positions;
 }
 
 function handleTileSelect(index) {

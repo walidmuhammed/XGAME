@@ -1,4 +1,12 @@
-import { createBoard, drawTokens, updateToken, updateOwnership, BOARD_TILES } from "./board.js";
+import {
+  createBoard,
+  drawTokens,
+  updateToken,
+  updateOwnership,
+  updateStructures,
+  updateMortgages,
+  BOARD_TILES,
+} from "./board.js";
 import { createInitialState, stepTurn, selectors } from "./rules.js";
 import { createUI } from "./ui.js";
 
@@ -11,13 +19,43 @@ const elements = {
   endBtn: document.getElementById("end-btn"),
   payBailBtn: document.getElementById("pay-bail-btn"),
   useCardBtn: document.getElementById("use-card-btn"),
+  buildBtn: document.getElementById("build-btn"),
+  sellBtn: document.getElementById("sell-btn"),
   diceResult: document.getElementById("dice-result"),
   currentPlayer: document.getElementById("current-player"),
   turnInfo: document.getElementById("turn-info"),
   tileDetail: document.getElementById("tile-detail"),
+  structureIcons: document.getElementById("structure-icons"),
+  structureInfo: document.getElementById("structure-info"),
+  financePanel: document.getElementById("finance-panel"),
+  mortgageBtn: document.getElementById("mortgage-btn"),
+  unmortgageBtn: document.getElementById("unmortgage-btn"),
+  tradeBtn: document.getElementById("trade-btn"),
   playerList: document.getElementById("player-list"),
   logList: document.getElementById("log-list"),
   newGameBtn: document.getElementById("new-game-btn"),
+  evenBuildToggle: document.getElementById("even-build-toggle"),
+  evenBuildStatus: document.getElementById("even-build-status"),
+  tradeModal: document.getElementById("trade-modal"),
+  tradePartnerSelect: document.getElementById("trade-partner-select"),
+  tradeOfferProperties: document.getElementById("trade-offer-properties"),
+  tradeRequestProperties: document.getElementById("trade-request-properties"),
+  tradeOfferCash: document.getElementById("trade-offer-cash"),
+  tradeRequestCash: document.getElementById("trade-request-cash"),
+  tradeStatus: document.getElementById("trade-status"),
+  tradeProposeBtn: document.getElementById("trade-propose-btn"),
+  tradeCounterBtn: document.getElementById("trade-counter-btn"),
+  tradeAcceptBtn: document.getElementById("trade-accept-btn"),
+  tradeDeclineBtn: document.getElementById("trade-decline-btn"),
+  tradeCancelBtn: document.getElementById("trade-cancel-btn"),
+  debtModal: document.getElementById("debt-modal"),
+  debtSummary: document.getElementById("debt-summary"),
+  debtSellList: document.getElementById("debt-sell-list"),
+  debtMortgageList: document.getElementById("debt-mortgage-list"),
+  debtTradeList: document.getElementById("debt-trade-list"),
+  debtAutoBtn: document.getElementById("debt-auto-btn"),
+  debtDoneBtn: document.getElementById("debt-done-btn"),
+  debtSurrenderBtn: document.getElementById("debt-surrender-btn"),
   cardModal: document.getElementById("card-modal"),
   cardOkBtn: document.getElementById("card-ok-btn"),
   cardTitle: document.getElementById("card-title"),
@@ -44,15 +82,21 @@ const ui = createUI({
 let currentTokenIds = [];
 let isAnimating = false;
 
+const DEBT_BLOCKED_INTENTS = new Set(["ROLL_DICE", "BUY_PROPERTY", "END_TURN"]);
+const TRADE_BLOCKED_INTENTS = new Set(["END_TURN"]);
+
 init();
 
 function init() {
   const restored = loadState();
   if (restored && Array.isArray(restored.players) && restored.players.length >= 2) {
     state = restored;
+    ensureStateShapes();
     ensureTokenLayer();
     syncTokenPositions();
     updateOwnership(state.tileOwnership);
+    syncStructures();
+    syncMortgages();
     ui.resetCardTracker();
     const active = selectors.getCurrentPlayer(state);
     ui.setSelectedTile(active ? active.position : 0);
@@ -65,7 +109,9 @@ function init() {
 
 async function dispatch(intent) {
   if (!intent || !intent.type) return;
-  if (isAnimating && intent.type !== "NEW_GAME") return;
+  if (state.debtContext?.active && DEBT_BLOCKED_INTENTS.has(intent.type)) return;
+  if (state.pendingTrade && TRADE_BLOCKED_INTENTS.has(intent.type)) return;
+  if (isAnimating && intent.type !== "NEW_GAME" && intent.type !== "TOGGLE_EVEN_BUILD") return;
 
   const previous = state;
   let next;
@@ -76,12 +122,15 @@ async function dispatch(intent) {
     return;
   }
   state = next;
+  ensureStateShapes();
 
   if (intent.type === "NEW_GAME") {
     currentTokenIds = [];
     ensureTokenLayer();
     syncTokenPositions();
     updateOwnership(state.tileOwnership);
+    syncStructures();
+    syncMortgages();
     ui.resetCardTracker();
     ui.setSelectedTile(0);
     ui.refresh();
@@ -95,6 +144,8 @@ async function dispatch(intent) {
     await runMovementSequence(previous, next);
     syncTokenPositions();
     updateOwnership(state.tileOwnership);
+    syncStructures();
+    syncMortgages();
     ui.refresh();
     return;
   }
@@ -102,6 +153,8 @@ async function dispatch(intent) {
   saveState();
   syncTokenPositions();
   updateOwnership(state.tileOwnership);
+  syncStructures();
+  syncMortgages();
   ui.refresh();
 }
 
@@ -119,6 +172,14 @@ function syncTokenPositions() {
   state.players.forEach((player) => {
     updateToken(player.id, player.position);
   });
+}
+
+function syncStructures() {
+  updateStructures(state.structures || {});
+}
+
+function syncMortgages() {
+  updateMortgages(state.mortgages || {});
 }
 
 async function runMovementSequence(prevState, nextState) {
@@ -175,5 +236,33 @@ function loadState() {
     return JSON.parse(raw);
   } catch (err) {
     return null;
+  }
+}
+
+function ensureStateShapes() {
+  if (!state.structures) {
+    state.structures = {};
+  }
+  if (!state.mortgages) {
+    state.mortgages = {};
+  }
+  BOARD_TILES.forEach((tile) => {
+    if (tile.type === "property") {
+      if (typeof state.structures[tile.id] !== "number") {
+        state.structures[tile.id] = 0;
+      }
+    }
+    if (tile.type === "property" || tile.type === "rail" || tile.type === "utility") {
+      if (typeof state.mortgages[tile.id] !== "boolean") {
+        state.mortgages[tile.id] = false;
+      }
+    }
+  });
+  if (!state.debtContext) {
+    state.debtContext = { active: false, amountOwed: 0, creditor: null };
+  }
+  if (state.pendingTrade) {
+    state.pendingTrade.offer = state.pendingTrade.offer || { cash: 0, properties: [] };
+    state.pendingTrade.request = state.pendingTrade.request || { cash: 0, properties: [] };
   }
 }
