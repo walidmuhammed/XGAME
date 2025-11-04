@@ -1,4 +1,4 @@
-import { BOARD_TILES } from "./board.js";
+import { BOARD_TILES, renderDiceOverlay } from "./board.js";
 import { selectors, canBuildHere, canSellHere, canMortgageHere, canUnmortgageHere } from "./rules.js";
 
 export function createUI({ elements, boardApi, onIntent, getState }) {
@@ -8,6 +8,12 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     tradeModalOpen: false,
     tradePartnerId: null,
     debtModalOpen: false,
+    diceOverlayKey: null,
+    diceTimeout: null,
+    startOverlayDismissed: false,
+    chatMessages: [],
+    lastChatLogId: 0,
+    toastTimeout: null,
   };
 
   const tileData = BOARD_TILES;
@@ -112,6 +118,51 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       onIntent({ type: "TOGGLE_EVEN_BUILD", payload: { value: event.target.checked } });
     });
   }
+  if (elements.doubleSetToggle) {
+    elements.doubleSetToggle.addEventListener("change", (event) => {
+      onIntent({ type: "TOGGLE_DOUBLE_SET", payload: { value: event.target.checked } });
+    });
+  }
+  if (elements.shareUrl) {
+    elements.shareUrl.value = window.location.href;
+  }
+  if (elements.shareCopy) {
+    elements.shareCopy.addEventListener("click", async () => {
+      const url = elements.shareUrl ? elements.shareUrl.value : window.location.href;
+      const copied = await copyToClipboard(url);
+      if (copied) {
+        showToast("Link copied!");
+      } else {
+        showToast("Copy not available");
+      }
+    });
+  }
+  if (elements.chatForm) {
+    elements.chatForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      sendChatMessage();
+    });
+  } else if (elements.chatSend) {
+    elements.chatSend.addEventListener("click", () => sendChatMessage());
+  }
+  if (elements.startBtn) {
+    elements.startBtn.addEventListener("click", () => {
+      uiState.startOverlayDismissed = true;
+      if (elements.startOverlay) {
+        elements.startOverlay.classList.add("hidden");
+      }
+      openSetupModal();
+    });
+  }
+  if (elements.appearanceOpen) {
+    elements.appearanceOpen.addEventListener("click", () => openAppearanceModal());
+  }
+  if (elements.appearanceSave) {
+    elements.appearanceSave.addEventListener("click", () => saveAppearance());
+  }
+  if (elements.appearanceCancel) {
+    elements.appearanceCancel.addEventListener("click", () => closeAppearanceModal());
+  }
 
   boardApi.onTileSelect((tile, index) => {
     uiState.selectedTileId = index;
@@ -134,37 +185,54 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     renderHeader(state);
     renderButtons(state);
     renderPlayers(state);
-    renderLog(state);
     renderTileDetail(state);
     renderFinanceControls(state);
     renderTradeModal(state);
     renderDebtModal(state);
+    renderLog(state);
+    renderChat();
     maybeShowCard(state);
     maybeShowWinner(state);
   }
 
   function renderHeader(state) {
     const player = selectors.getCurrentPlayer(state);
-    if (player) {
-      elements.currentPlayer.innerHTML = `
-        <span class="badge" style="background:${player.color}"></span>
-        ${escapeHtml(player.name)} — $${player.cash}
-      `;
-    } else {
-      elements.currentPlayer.textContent = "No active player";
+
+    if (Array.isArray(state.players) && state.players.length > 0) {
+      uiState.startOverlayDismissed = true;
+    }
+
+    if (elements.currentPlayer) {
+      if (player) {
+        elements.currentPlayer.innerHTML = `
+          <span class="player-avatar" style="background:${player.color}"></span>
+          <span>${escapeHtml(player.name)}</span>
+          <span>— $${player.cash}</span>
+        `;
+      } else {
+        elements.currentPlayer.textContent = "Waiting for players";
+      }
+    }
+
+    if (elements.maxPlayersLabel) {
+      elements.maxPlayersLabel.textContent = state.config?.maxPlayers ?? "—";
     }
 
     if (elements.evenBuildToggle) {
-      elements.evenBuildToggle.checked = Boolean(state.config?.evenBuild);
-      elements.evenBuildToggle.setAttribute(
-        "aria-label",
-        `Even-Build rule ${state.config?.evenBuild ? "on" : "off"}`
-      );
+      const evenOn = Boolean(state.config?.evenBuild);
+      elements.evenBuildToggle.checked = evenOn;
+      elements.evenBuildToggle.setAttribute("aria-label", `Even-Build rule ${evenOn ? "on" : "off"}`);
     }
     if (elements.evenBuildStatus) {
-      const isOn = Boolean(state.config?.evenBuild);
-      elements.evenBuildStatus.textContent = isOn ? "ON" : "OFF";
-      elements.evenBuildStatus.classList.toggle("off", !isOn);
+      const evenOn = Boolean(state.config?.evenBuild);
+      elements.evenBuildStatus.textContent = evenOn ? "ON" : "OFF";
+      elements.evenBuildStatus.classList.toggle("off", !evenOn);
+    }
+    if (elements.doubleSetToggle) {
+      elements.doubleSetToggle.checked = Boolean(state.config?.doubleSetRent);
+    }
+    if (elements.appearanceOpen) {
+      elements.appearanceOpen.disabled = !player;
     }
 
     if (elements.turnInfo) {
@@ -187,12 +255,17 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       elements.turnInfo.textContent = info;
     }
 
-    if (state.turn.lastRoll) {
-      const [d1, d2] = state.turn.lastRoll.dice;
-      elements.diceResult.textContent = `🎲 ${d1} + ${d2} = ${state.turn.lastRoll.total}`;
-    } else {
-      elements.diceResult.textContent = "Roll to start";
+    if (elements.diceResult) {
+      if (state.turn.lastRoll && Array.isArray(state.turn.lastRoll.dice)) {
+        const [d1, d2] = state.turn.lastRoll.dice;
+        elements.diceResult.textContent = `🎲 ${d1} + ${d2} = ${state.turn.lastRoll.total}`;
+      } else {
+        elements.diceResult.textContent = "Roll to start";
+      }
     }
+
+    updateStartOverlay(state);
+    updateDiceOverlay(state);
 
     if (player) {
       uiState.selectedTileId ??= player.position;
@@ -290,19 +363,49 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   }
 
   function renderPlayers(state) {
+    if (!elements.playerList) return;
     elements.playerList.innerHTML = "";
     state.players.forEach((player, index) => {
       const li = document.createElement("li");
-      li.innerHTML = `
-        <span class="player-name">
-          <span class="badge" style="background:${player.color}"></span>
-          ${escapeHtml(player.name)}
-        </span>
-        <span class="player-cash">$${player.cash}${player.bankrupt ? " (out)" : ""}</span>
-      `;
+      li.className = "player-row";
       if (state.turn.currentIndex === index && !player.bankrupt) {
         li.classList.add("active");
       }
+      if (player.bankrupt) {
+        li.classList.add("bankrupt");
+      }
+
+      const meta = document.createElement("div");
+      meta.className = "player-meta";
+
+      const avatar = document.createElement("span");
+      avatar.className = "player-avatar";
+      avatar.style.background = player.color || "#fff";
+      meta.appendChild(avatar);
+
+      const name = document.createElement("span");
+      name.className = "player-name";
+      name.textContent = player.name;
+      meta.appendChild(name);
+
+      if (state.turn.currentIndex === index && !player.bankrupt) {
+        const badge = document.createElement("span");
+        badge.className = "player-chip";
+        badge.textContent = "👑";
+        meta.appendChild(badge);
+      } else if (player.bankrupt) {
+        const badge = document.createElement("span");
+        badge.className = "player-chip";
+        badge.textContent = "💤";
+        meta.appendChild(badge);
+      }
+
+      const cash = document.createElement("span");
+      cash.className = "player-cash";
+      cash.textContent = player.bankrupt ? "Bankrupt" : `$${player.cash}`;
+
+      li.appendChild(meta);
+      li.appendChild(cash);
       li.addEventListener("click", () => {
         uiState.selectedTileId = player.position;
         boardApi.setSelectedTile(uiState.selectedTileId);
@@ -313,12 +416,33 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   }
 
   function renderLog(state) {
+    if (!elements.logList) return;
     elements.logList.innerHTML = "";
-    state.log.slice().reverse().forEach((entry) => {
-      const li = document.createElement("li");
-      li.textContent = entry.text;
-      elements.logList.appendChild(li);
-    });
+    if (state.log.length && state.log[state.log.length - 1].id < uiState.lastChatLogId) {
+      uiState.lastChatLogId = 0;
+    }
+    state.log
+      .slice()
+      .reverse()
+      .forEach((entry) => {
+        const li = document.createElement("li");
+        li.textContent = entry.text;
+        elements.logList.appendChild(li);
+      });
+
+    const newLogs = state.log.filter((entry) => entry.id > uiState.lastChatLogId);
+    if (newLogs.length) {
+      newLogs.forEach((entry) => {
+        pushChatMessage({
+          id: entry.id,
+          author: "System",
+          kind: "system",
+          text: entry.text,
+          timestamp: entry.timestamp,
+        });
+      });
+      uiState.lastChatLogId = newLogs[newLogs.length - 1].id;
+    }
   }
 
   function renderTileDetail(state = getState()) {
@@ -334,6 +458,11 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     const lines = [];
     lines.push(`<strong>${escapeHtml(tile.name)}</strong>`);
     lines.push(`<span class="detail-type">${formatTileType(tile.type)}</span>`);
+    if (owner) {
+      lines.push(`Owner: <span style="color:${owner.color}">${escapeHtml(owner.name)}</span>`);
+    } else if (tile.price > 0) {
+      lines.push("Owner: Bank");
+    }
     if (tile.price) {
       lines.push(`Price: $${tile.price}`);
     }
@@ -359,11 +488,6 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       lines.push(`Mortgage: ${isMortgaged ? "Mortgaged" : `Clear (value $${tile.mortgage})`}`);
     } else if (tile.type === "tax") {
       lines.push(`Pay: $${tile.tax}`);
-    }
-    if (owner) {
-      lines.push(`Owner: <span style="color:${owner.color}">${escapeHtml(owner.name)}</span>`);
-    } else if (tile.type === "property" || tile.type === "rail" || tile.type === "utility") {
-      lines.push("Owner: Bank");
     }
     elements.tileDetail.innerHTML = lines.map((line) => `<div>${line}</div>`).join("");
   }
@@ -792,6 +916,175 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     }
   }
 
+  function renderChat() {
+    if (!elements.chatList) return;
+    elements.chatList.innerHTML = "";
+    const recent = uiState.chatMessages.slice(-80);
+    if (!recent.length) {
+      const empty = document.createElement("li");
+      empty.className = "chat-empty";
+      empty.textContent = "No messages yet";
+      elements.chatList.appendChild(empty);
+      return;
+    }
+    recent.forEach((message) => {
+      const item = document.createElement("li");
+      item.className = `chat-item ${message.kind === "you" ? "you" : "system"}`;
+      const bubble = document.createElement("div");
+      bubble.className = "chat-bubble";
+      bubble.textContent = message.text;
+      const meta = document.createElement("span");
+      meta.className = "chat-meta";
+      meta.textContent = message.author;
+      item.appendChild(bubble);
+      item.appendChild(meta);
+      elements.chatList.appendChild(item);
+    });
+    const body = elements.chatList.parentElement;
+    if (body) {
+      body.scrollTop = body.scrollHeight;
+    }
+  }
+
+  function pushChatMessage(message) {
+    uiState.chatMessages.push({
+      id: message.id ?? Date.now(),
+      author: message.author || "System",
+      kind: message.kind || "system",
+      text: message.text || "",
+      timestamp: message.timestamp || Date.now(),
+    });
+    if (uiState.chatMessages.length > 120) {
+      uiState.chatMessages.splice(0, uiState.chatMessages.length - 120);
+    }
+    renderChat();
+  }
+
+  function sendChatMessage() {
+    if (!elements.chatInput) return;
+    const raw = elements.chatInput.value.trim();
+    if (!raw) return;
+    pushChatMessage({ id: Date.now(), author: "You", kind: "you", text: raw, timestamp: Date.now() });
+    elements.chatInput.value = "";
+  }
+
+  function updateStartOverlay(state) {
+    if (!elements.startOverlay) return;
+    const shouldShow = !uiState.startOverlayDismissed && (!state.players || state.players.length === 0);
+    elements.startOverlay.classList.toggle("hidden", !shouldShow);
+  }
+
+  function updateDiceOverlay(state) {
+    if (!elements.diceOverlay) return;
+    const lastRoll = state.turn.lastRoll;
+    if (lastRoll && Array.isArray(lastRoll.dice)) {
+      const key = `${lastRoll.dice.join("-")}-${lastRoll.total}`;
+      if (uiState.diceOverlayKey !== key) {
+        uiState.diceOverlayKey = key;
+        renderDiceOverlay(elements.diceOverlay, lastRoll.dice[0], lastRoll.dice[1]);
+        if (uiState.diceTimeout) {
+          clearTimeout(uiState.diceTimeout);
+        }
+        uiState.diceTimeout = setTimeout(() => {
+          if (elements.diceOverlay) {
+            elements.diceOverlay.classList.remove("visible");
+          }
+        }, 1200);
+      }
+    } else {
+      uiState.diceOverlayKey = null;
+      if (uiState.diceTimeout) {
+        clearTimeout(uiState.diceTimeout);
+        uiState.diceTimeout = null;
+      }
+      elements.diceOverlay.classList.remove("visible");
+    }
+  }
+
+  function openAppearanceModal() {
+    if (!elements.appearanceModal) return;
+    const player = selectors.getCurrentPlayer(getState());
+    if (!player) return;
+    if (elements.appearanceName) {
+      elements.appearanceName.value = player.name || "";
+    }
+    if (elements.appearanceColor) {
+      elements.appearanceColor.value = sanitizeColorInput(player.color);
+    }
+    elements.appearanceModal.classList.remove("hidden");
+    elements.appearanceModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeAppearanceModal() {
+    if (!elements.appearanceModal) return;
+    elements.appearanceModal.classList.add("hidden");
+    elements.appearanceModal.setAttribute("aria-hidden", "true");
+  }
+
+  function saveAppearance() {
+    const player = selectors.getCurrentPlayer(getState());
+    if (!player) {
+      closeAppearanceModal();
+      return;
+    }
+    const nameValue = elements.appearanceName ? elements.appearanceName.value.trim() : player.name;
+    const colorValue = elements.appearanceColor ? sanitizeColorInput(elements.appearanceColor.value) : player.color;
+    onIntent({ type: "UPDATE_APPEARANCE", payload: { name: nameValue || player.name, color: colorValue } });
+    closeAppearanceModal();
+    showToast("Appearance updated");
+  }
+
+  function sanitizeColorInput(value) {
+    if (typeof value !== "string") return "#ffffff";
+    if (/^#[0-9a-f]{6}$/i.test(value)) return value;
+    if (/^#[0-9a-f]{3}$/i.test(value)) {
+      const chars = value.slice(1).split("");
+      return `#${chars.map((c) => c + c).join("")}`;
+    }
+    return "#ffffff";
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      // fall through to legacy path
+    }
+    const temp = document.createElement("textarea");
+    temp.value = text;
+    temp.style.position = "fixed";
+    temp.style.opacity = "0";
+    document.body.appendChild(temp);
+    temp.select();
+    try {
+      const ok = document.execCommand("copy");
+      document.body.removeChild(temp);
+      return ok;
+    } catch (err) {
+      document.body.removeChild(temp);
+      return false;
+    }
+  }
+
+  function showToast(message) {
+    if (!elements.toast) return;
+    elements.toast.textContent = message;
+    elements.toast.classList.remove("hidden");
+    elements.toast.classList.add("visible");
+    if (uiState.toastTimeout) {
+      clearTimeout(uiState.toastTimeout);
+    }
+    uiState.toastTimeout = setTimeout(() => {
+      if (elements.toast) {
+        elements.toast.classList.remove("visible");
+        elements.toast.classList.add("hidden");
+      }
+    }, 1800);
+  }
+
   function handleDebtListClick(event, intentType) {
     const button = event.target.closest("button[data-tile-id]");
     if (!button) return;
@@ -1014,6 +1307,11 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     },
     resetCardTracker() {
       uiState.lastCardId = null;
+    },
+    resetChat() {
+      uiState.chatMessages = [];
+      uiState.lastChatLogId = 0;
+      renderChat();
     },
   };
 }

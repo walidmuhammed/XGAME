@@ -24,6 +24,12 @@ const elements = {
   diceResult: document.getElementById("dice-result"),
   currentPlayer: document.getElementById("current-player"),
   turnInfo: document.getElementById("turn-info"),
+  shareUrl: document.getElementById("share-url"),
+  shareCopy: document.getElementById("share-copy"),
+  chatList: document.getElementById("chat-list"),
+  chatForm: document.getElementById("chat-form"),
+  chatInput: document.getElementById("chat-input"),
+  chatSend: document.getElementById("chat-send"),
   tileDetail: document.getElementById("tile-detail"),
   structureIcons: document.getElementById("structure-icons"),
   structureInfo: document.getElementById("structure-info"),
@@ -36,6 +42,10 @@ const elements = {
   newGameBtn: document.getElementById("new-game-btn"),
   evenBuildToggle: document.getElementById("even-build-toggle"),
   evenBuildStatus: document.getElementById("even-build-status"),
+  doubleSetToggle: document.getElementById("double-set-toggle"),
+  diceOverlay: document.getElementById("dice-overlay"),
+  startOverlay: document.getElementById("start-overlay"),
+  startBtn: document.getElementById("start-btn"),
   tradeModal: document.getElementById("trade-modal"),
   tradePartner: document.getElementById("trade-partner"),
   tradeOfferProps: document.getElementById("trade-offer-props"),
@@ -68,6 +78,14 @@ const elements = {
   winModal: document.getElementById("win-modal"),
   winText: document.getElementById("win-text"),
   winOkBtn: document.getElementById("win-ok-btn"),
+  appearanceModal: document.getElementById("appearance-modal"),
+  appearanceOpen: document.getElementById("appearance-open"),
+  appearanceName: document.getElementById("appearance-name"),
+  appearanceColor: document.getElementById("appearance-color"),
+  appearanceSave: document.getElementById("appearance-save"),
+  appearanceCancel: document.getElementById("appearance-cancel"),
+  maxPlayersLabel: document.getElementById("max-players-label"),
+  toast: document.getElementById("toast"),
 };
 
 let state = createInitialState();
@@ -124,6 +142,11 @@ async function dispatch(intent) {
   state = next;
   ensureStateShapes();
 
+  if (intent.type === "UPDATE_APPEARANCE") {
+    drawTokens(state.players);
+    currentTokenIds = state.players.map((player) => player.id);
+  }
+
   if (intent.type === "NEW_GAME") {
     currentTokenIds = [];
     ensureTokenLayer();
@@ -132,6 +155,9 @@ async function dispatch(intent) {
     syncStructures();
     syncMortgages();
     ui.resetCardTracker();
+    if (ui.resetChat) {
+      ui.resetChat();
+    }
     ui.setSelectedTile(0);
     ui.refresh();
     saveState();
@@ -240,6 +266,15 @@ function loadState() {
 }
 
 function ensureStateShapes() {
+  if (!state.config) {
+    state.config = {};
+  }
+  if (typeof state.config.evenBuild !== "boolean") {
+    state.config.evenBuild = true;
+  }
+  if (typeof state.config.doubleSetRent !== "boolean") {
+    state.config.doubleSetRent = false;
+  }
   if (!state.structures) {
     state.structures = {};
   }

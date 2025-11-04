@@ -4,76 +4,174 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Richup Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="app">
-    <header class="top-bar">
-      <div class="title">Richup Prototype</div>
-      <div class="current-player" id="current-player"></div>
-      <button id="new-game-btn" class="primary">New Game</button>
+  <div class="app-shell">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-badge">R</span>
+        <span>RICHUP Prototype</span>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="icon-btn" aria-label="Controller">
+          <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#gamepad-2"></use></svg>
+        </button>
+        <button type="button" class="icon-btn" aria-label="Help">
+          <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#help-circle"></use></svg>
+        </button>
+        <button type="button" class="icon-btn" aria-label="Sound">
+          <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#volume-2"></use></svg>
+        </button>
+      </div>
     </header>
-    <main class="main-area">
-      <section class="board-area">
-        <svg id="board-svg" viewBox="0 0 600 600" role="img" aria-label="Richup board"></svg>
-      </section>
-      <aside class="panel">
-        <div class="panel-section">
-          <h2>Turn</h2>
-          <div id="turn-info"></div>
-          <div class="dice-display">
-            <span id="dice-result">Roll to start</span>
-          </div>
-          <div class="panel-actions">
-            <button id="roll-btn" class="primary">Roll Dice</button>
-            <button id="buy-btn" class="secondary" disabled>Buy Property</button>
-            <button id="end-btn" class="secondary" disabled>End Turn</button>
-            <button id="pay-bail-btn" class="secondary" disabled>Pay Bail</button>
-            <button id="use-card-btn" class="secondary" disabled>Use Get Out of Jail</button>
-            <button id="build-btn" class="secondary hidden" disabled>Build +</button>
-            <button id="sell-btn" class="secondary hidden" disabled>Sell −</button>
-            <button id="trade-btn" class="secondary">Trade</button>
-          </div>
-        </div>
-        <div class="panel-section">
-          <h2>Property</h2>
-          <div id="structure-icons" class="structure-icons">—</div>
-          <div id="structure-info" class="structure-info"></div>
-          <div class="finance-panel" id="finance-panel">
-            <div class="finance-title">Finance</div>
-            <div class="finance-actions">
-              <button id="mortgage-btn" class="secondary" disabled>Mortgage</button>
-              <button id="unmortgage-btn" class="secondary" disabled>Unmortgage</button>
+
+    <main class="shell-grid">
+      <aside class="shell-left">
+        <section class="card share-card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#share-2"></use></svg>
+              Share this game
             </div>
           </div>
-          <div id="tile-detail">Select a tile</div>
-        </div>
-        <div class="panel-section">
-          <h2>Rules</h2>
-          <div class="rule-toggle">
-            <label for="even-build-toggle">
-              <input type="checkbox" id="even-build-toggle" checked>
-              Even-Build Rule: <span id="even-build-status">ON</span>
-            </label>
+          <div class="share-body">
+            <input id="share-url" class="share-input" type="text" readonly>
+            <button id="share-copy" class="btn primary sm" type="button">Copy</button>
+          </div>
+        </section>
+
+        <section class="card chat-card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#message-circle"></use></svg>
+              Chat
+            </div>
+          </div>
+          <div class="chat-body">
+            <ul id="chat-list" class="chat-list"></ul>
+          </div>
+          <form class="chat-composer" id="chat-form">
+            <input id="chat-input" type="text" placeholder="Say something…" autocomplete="off">
+            <button id="chat-send" class="icon-btn send" type="submit" aria-label="Send">
+              <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#send"></use></svg>
+            </button>
+          </form>
+        </section>
+      </aside>
+
+      <section class="shell-center">
+        <div class="stage">
+          <div class="board-frame">
+            <svg id="board-svg" viewBox="0 0 600 600" role="img" aria-label="Richup board"></svg>
+            <div id="dice-overlay" class="dice-overlay"></div>
+            <div id="start-overlay" class="start-overlay">
+              <button id="start-btn" class="btn primary lg">Start Game</button>
+            </div>
           </div>
         </div>
-        <div class="panel-section">
-          <h2>Players</h2>
-          <ul id="player-list"></ul>
+
+        <div class="center-lower">
+          <section class="card turn-card">
+            <div class="turn-meta">
+              <div id="turn-info" class="turn-info"></div>
+              <div class="dice-readout" id="dice-result">Roll to start</div>
+            </div>
+            <div class="control-buttons">
+              <button id="roll-btn" class="btn primary">Roll Dice</button>
+              <button id="buy-btn" class="btn ghost" disabled>Buy</button>
+              <button id="end-btn" class="btn ghost" disabled>End Turn</button>
+              <button id="pay-bail-btn" class="btn ghost" disabled>Pay Bail</button>
+              <button id="use-card-btn" class="btn ghost" disabled>Use Card</button>
+              <button id="build-btn" class="btn ghost hidden" disabled>Build +</button>
+              <button id="sell-btn" class="btn ghost hidden" disabled>Sell −</button>
+              <button id="trade-btn" class="btn ghost">Trade</button>
+            </div>
+          </section>
+
+          <section class="card property-card">
+            <div class="card-header">
+              <div class="card-title">
+                <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#map"></use></svg>
+                Property details
+              </div>
+            </div>
+            <div id="structure-icons" class="structure-icons muted">—</div>
+            <div id="structure-info" class="structure-info"></div>
+            <div class="finance-panel" id="finance-panel">
+              <div class="finance-title">Finance</div>
+              <div class="finance-actions">
+                <button id="mortgage-btn" class="btn ghost" disabled>Mortgage</button>
+                <button id="unmortgage-btn" class="btn ghost" disabled>Unmortgage</button>
+              </div>
+            </div>
+            <div id="tile-detail" class="tile-detail">Select a tile</div>
+          </section>
         </div>
+      </section>
+
+      <aside class="shell-right">
+        <section class="card players-card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#users"></use></svg>
+              Players
+            </div>
+            <button id="appearance-open" class="btn ghost sm" type="button">Change appearance</button>
+          </div>
+          <div id="current-player" class="current-player-chip"></div>
+          <ul id="player-list" class="player-list"></ul>
+        </section>
+
+        <section class="card settings-card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#settings-2"></use></svg>
+              Game settings
+            </div>
+          </div>
+          <div class="settings-body">
+            <div class="setting-row">
+              <span class="setting-label">Maximum players</span>
+              <span class="setting-value" id="max-players-label">—</span>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="double-set-toggle">
+              <span class="toggle-switch"></span>
+              <span class="toggle-label">x2 rent on full-set properties</span>
+            </label>
+            <label class="toggle">
+              <input type="checkbox" id="even-build-toggle" checked>
+              <span class="toggle-switch"></span>
+              <span class="toggle-label">Even-Build rule <span id="even-build-status">ON</span></span>
+            </label>
+          </div>
+          <button id="new-game-btn" class="btn primary full" type="button">New Game</button>
+        </section>
       </aside>
     </main>
-    <footer class="log-area">
-      <h2>Action Log</h2>
-      <ul id="log-list"></ul>
+
+    <footer class="log-card">
+      <div class="card-header">
+        <div class="card-title">
+          <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#list"></use></svg>
+          Action log
+        </div>
+      </div>
+      <ul id="log-list" class="log-list"></ul>
     </footer>
+
+    <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   </div>
 
   <div class="modal hidden" id="card-modal" aria-hidden="true" role="dialog">
     <div class="modal-content">
       <h2 id="card-title">Card</h2>
       <p id="card-text"></p>
-      <button id="card-ok-btn" class="primary">OK</button>
+      <button id="card-ok-btn" class="btn primary">OK</button>
     </div>
   </div>
 
@@ -102,11 +200,11 @@
       </div>
       <div id="trade-fairness" class="fairness">Fairness: —</div>
       <div class="form-actions trade-actions">
-        <button id="trade-propose" class="primary">Propose</button>
-        <button id="trade-counter">Counter</button>
-        <button id="trade-accept" class="success">Accept</button>
-        <button id="trade-decline" class="danger">Decline</button>
-        <button id="trade-cancel" class="secondary">Cancel</button>
+        <button id="trade-propose" class="btn primary">Propose</button>
+        <button id="trade-counter" class="btn ghost">Counter</button>
+        <button id="trade-accept" class="btn success">Accept</button>
+        <button id="trade-decline" class="btn danger">Decline</button>
+        <button id="trade-cancel" class="btn ghost">Cancel</button>
       </div>
     </div>
   </div>
@@ -130,9 +228,9 @@
         </div>
       </div>
       <div class="debt-footer">
-        <button id="debt-auto-btn" class="secondary">Auto-Liquidate</button>
-        <button id="debt-done-btn" class="primary">Done</button>
-        <button id="debt-surrender-btn" class="secondary">Surrender</button>
+        <button id="debt-auto-btn" class="btn ghost">Auto-Liquidate</button>
+        <button id="debt-done-btn" class="btn primary">Done</button>
+        <button id="debt-surrender-btn" class="btn ghost">Surrender</button>
       </div>
     </div>
   </div>
@@ -147,8 +245,8 @@
         </div>
         <div id="player-config"></div>
         <div class="form-actions">
-          <button type="submit" class="primary">Start</button>
-          <button type="button" id="cancel-setup-btn" class="secondary">Cancel</button>
+          <button type="submit" class="btn primary">Start</button>
+          <button type="button" id="cancel-setup-btn" class="btn ghost">Cancel</button>
         </div>
       </form>
     </div>
@@ -158,7 +256,25 @@
     <div class="modal-content">
       <h2>Winner</h2>
       <p id="win-text"></p>
-      <button id="win-ok-btn" class="primary">New Game</button>
+      <button id="win-ok-btn" class="btn primary">New Game</button>
+    </div>
+  </div>
+
+  <div class="modal hidden" id="appearance-modal" aria-hidden="true" role="dialog">
+    <div class="modal-content">
+      <h2>Edit appearance</h2>
+      <div class="form-row">
+        <label for="appearance-name">Display name</label>
+        <input id="appearance-name" type="text" maxlength="18">
+      </div>
+      <div class="form-row">
+        <label for="appearance-color">Token color</label>
+        <input id="appearance-color" type="color" value="#ffffff">
+      </div>
+      <div class="form-actions">
+        <button id="appearance-save" class="btn primary" type="button">Save</button>
+        <button id="appearance-cancel" class="btn ghost" type="button">Cancel</button>
+      </div>
     </div>
   </div>
 

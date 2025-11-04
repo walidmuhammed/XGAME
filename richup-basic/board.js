@@ -14,28 +14,64 @@ const SLOT_OFFSETS = [
   [18, -18],
 ];
 
+const PIP_POSITIONS = {
+  1: [
+    [50, 50],
+  ],
+  2: [
+    [28, 28],
+    [72, 72],
+  ],
+  3: [
+    [28, 28],
+    [50, 50],
+    [72, 72],
+  ],
+  4: [
+    [28, 28],
+    [28, 72],
+    [72, 28],
+    [72, 72],
+  ],
+  5: [
+    [28, 28],
+    [28, 72],
+    [50, 50],
+    [72, 28],
+    [72, 72],
+  ],
+  6: [
+    [28, 24],
+    [28, 50],
+    [28, 76],
+    [72, 24],
+    [72, 50],
+    [72, 76],
+  ],
+};
+
 const GROUP_COLORS = {
-  coral: "#f8a5c2",
-  amber: "#f6b93b",
-  verdant: "#78e08f",
-  azure: "#60a3bc",
-  sunset: "#f19066",
-  crimson: "#eb4d4b",
-  indigo: "#546de5",
-  aurora: "#9b59b6",
+  coral: "#f08fb8",
+  amber: "#f7b733",
+  verdant: "#52e0a1",
+  azure: "#5caee3",
+  sunset: "#f7a36d",
+  crimson: "#ff6f7c",
+  indigo: "#6574ff",
+  aurora: "#b482ff",
 };
 
 const TYPE_COLORS = {
-  start: "#f6f2d4",
-  jail: "#f8c291",
-  gotojail: "#f3a683",
-  free: "#dfe6e9",
-  tax: "#fadbd8",
-  treasure: "#d1f2eb",
-  surprise: "#d6eaf8",
-  rail: "#d5d8dc",
-  utility: "#d6dbe0",
-  property: "#ffffff",
+  start: "#2e2646",
+  jail: "#3c2a3d",
+  gotojail: "#3b2841",
+  free: "#231f33",
+  tax: "#36263c",
+  treasure: "#1f2d3b",
+  surprise: "#24314a",
+  rail: "#26263a",
+  utility: "#1f2c3d",
+  property: "#191828",
 };
 
 export const BOARD_TILES = [
@@ -553,7 +589,7 @@ export function updateMortgages(mortgages = {}) {
     if (!badge || !baseRect) return;
     const mortgaged = Boolean(mortgages[tile.id] ?? mortgages[String(tile.id)]);
     badge.setAttribute("opacity", mortgaged ? "1" : "0");
-    baseRect.setAttribute("fill", mortgaged ? "#dfe6e9" : baseFill);
+    baseRect.setAttribute("fill", mortgaged ? "#3c3a4d" : baseFill);
   });
 }
 
@@ -722,7 +758,7 @@ function buildTileElement(tile, rect, index) {
   base.setAttribute("width", rect.width);
   base.setAttribute("height", rect.height);
   base.setAttribute("fill", TYPE_COLORS[tile.type] || TYPE_COLORS.property);
-  base.setAttribute("stroke", "#2c3e50");
+  base.setAttribute("stroke", "#2b2a3a");
   base.setAttribute("stroke-width", "1.5");
   group.appendChild(base);
   boardState.baseRects.set(index, base);
@@ -770,8 +806,8 @@ function buildTileElement(tile, rect, index) {
   label.classList.add("tile-label");
   label.setAttribute("text-anchor", "middle");
   label.setAttribute("dominant-baseline", "middle");
-  label.setAttribute("fill", "#2c3e50");
-  label.setAttribute("font-size", tile.type === "property" ? "10" : "12");
+  label.setAttribute("fill", "#e8e9f1");
+  label.setAttribute("font-size", tile.type === "property" ? "11" : "12");
 
   let textX = rect.x + rect.width / 2;
   let textY = rect.y + rect.height / 2;
@@ -797,8 +833,8 @@ function buildTileElement(tile, rect, index) {
     const price = document.createElementNS(SVG_NS, "text");
     price.classList.add("tile-price");
     price.setAttribute("text-anchor", "middle");
-    price.setAttribute("fill", "#34495e");
-    price.setAttribute("font-size", "9");
+    price.setAttribute("fill", "#b7bac7");
+    price.setAttribute("font-size", "10");
 
     if (rect.orientation === "bottom") {
       price.setAttribute("x", rect.x + rect.width / 2);
@@ -863,9 +899,10 @@ function createOwnerMarker(rect) {
   marker.setAttribute("cx", position.x);
   marker.setAttribute("cy", position.y);
   marker.setAttribute("r", 9);
-  marker.setAttribute("fill", "#000000");
+  marker.setAttribute("fill", "#ffffff");
   marker.setAttribute("stroke", "#ffffff");
   marker.setAttribute("stroke-width", "2");
+  marker.setAttribute("fill-opacity", "0.85");
   marker.setAttribute("opacity", "0");
   marker.classList.add("tile-owner-marker");
   return marker;
@@ -1004,4 +1041,30 @@ function handleTileSelect(index) {
   if (boardState.selectHandler) {
     boardState.selectHandler(boardState.tiles[index], index);
   }
+}
+
+export function renderDiceOverlay(container, dieOne, dieTwo) {
+  if (!container) return;
+  container.innerHTML = "";
+  container.classList.remove("visible");
+  if (!dieOne || !dieTwo) {
+    container.classList.remove("visible");
+    return;
+  }
+  [dieOne, dieTwo].forEach((value) => {
+    const die = document.createElement("div");
+    die.className = "dice-cube";
+    const positions = PIP_POSITIONS[value] || [];
+    positions.forEach(([x, y]) => {
+      const pip = document.createElement("span");
+      pip.className = "dice-dot";
+      pip.style.left = `${x}%`;
+      pip.style.top = `${y}%`;
+      pip.style.transform = "translate(-50%, -50%)";
+      die.appendChild(pip);
+    });
+    container.appendChild(die);
+  });
+  void container.offsetWidth; // trigger reflow for css animation
+  container.classList.add("visible");
 }

@@ -8,6 +8,7 @@ const DEFAULT_CONFIG = {
   startCash: 1500,
   logLimit: 40,
   evenBuild: true,
+  doubleSetRent: false,
 };
 
 const MORTGAGE_INTEREST_RATE = 0.1;
@@ -84,6 +85,8 @@ export function stepTurn(state, intent) {
       return handleSellHouse(state, intent.payload || {});
     case "TOGGLE_EVEN_BUILD":
       return handleToggleEvenBuild(state, intent.payload || {});
+    case "TOGGLE_DOUBLE_SET":
+      return handleToggleDoubleSet(state, intent.payload || {});
     case "MORTGAGE_PROPERTY":
       return handleMortgageProperty(state, intent.payload || {});
     case "UNMORTGAGE_PROPERTY":
@@ -102,6 +105,8 @@ export function stepTurn(state, intent) {
       return handleDeclineTrade(state, "cancel");
     case "CLOSE_TRADE":
       return handleCloseTrade(state);
+    case "UPDATE_APPEARANCE":
+      return handleUpdateAppearance(state, intent.payload || {});
     case "BEGIN_DEBT_RESOLUTION":
       return handleBeginDebtResolution(state, intent.payload || {});
     case "AUTO_LIQUIDATE":
@@ -178,7 +183,8 @@ function startNewGame(prevState, payload) {
     treasure: createDeck(TREASURE_CARDS, base),
   };
 
-  base.config.evenBuild = payload.evenBuild ?? true;
+  base.config.evenBuild = payload.evenBuild ?? base.config.evenBuild ?? true;
+  base.config.doubleSetRent = payload.doubleSetRent ?? base.config.doubleSetRent ?? false;
   base.debtContext = {
     active: false,
     amountOwed: 0,
@@ -442,6 +448,39 @@ function handleToggleEvenBuild(state, payload) {
   }
   next.config.evenBuild = desired;
   pushLog(next, `Even-Build rule ${desired ? "enabled" : "disabled"}.`);
+  return next;
+}
+
+function handleToggleDoubleSet(state, payload) {
+  const next = cloneState(state);
+  const desired =
+    typeof payload.value === "boolean" ? payload.value : !Boolean(next.config?.doubleSetRent);
+  if (next.config.doubleSetRent === desired) {
+    return next;
+  }
+  next.config.doubleSetRent = desired;
+  pushLog(next, `Double-set rent ${desired ? "enabled" : "disabled"}.`);
+  return next;
+}
+
+function handleUpdateAppearance(state, payload) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const previousName = player.name;
+  const previousColor = player.color;
+  const rawName = typeof payload.name === "string" ? payload.name.trim() : player.name;
+  if (rawName) {
+    player.name = rawName.slice(0, 24);
+  }
+  const rawColor = typeof payload.color === "string" ? payload.color.trim() : player.color;
+  if (/^#[0-9a-f]{6}$/i.test(rawColor)) {
+    player.color = rawColor.toUpperCase();
+  }
+  const displayName = player.name || previousName;
+  if (displayName !== previousName || player.color !== previousColor) {
+    pushLog(next, `${displayName} refreshes their appearance.`);
+  }
   return next;
 }
 
@@ -784,7 +823,15 @@ function resolveProperty(state, player, tile) {
 
   const houses = state.structures?.[tile.id] ?? 0;
   const rentTable = Array.isArray(tile.rents) ? tile.rents : [];
-  const rentValue = rentTable[houses] ?? rentTable[rentTable.length - 1] ?? 0;
+  let rentValue = rentTable[houses] ?? rentTable[rentTable.length - 1] ?? 0;
+  if (
+    houses === 0 &&
+    tile.group &&
+    state.config?.doubleSetRent &&
+    ownsFullGroup(state, owner.id, tile.group)
+  ) {
+    rentValue *= 2;
+  }
   transferCash(state, player, owner, rentValue, `${player.name} pays $${rentValue} rent to ${owner.name} for ${tile.name}.`);
 }
 
