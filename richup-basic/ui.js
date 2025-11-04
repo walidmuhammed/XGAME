@@ -6,9 +6,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     selectedTileId: null,
     lastCardId: null,
     debtModalOpen: false,
-    diceOverlayKey: null,
     diceTimeout: null,
-    startOverlayDismissed: false,
     chatMessages: [],
     lastChatLogId: 0,
     toastTimeout: null,
@@ -21,29 +19,23 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     lastInboundThreadId: null,
     inboundCanCancel: false,
     tradeComposerJustOpened: false,
+    activePropTileId: null,
   };
 
   const tileData = BOARD_TILES;
+  const groupPalette = {
+    coral: "#f08fb8",
+    amber: "#f7b733",
+    verdant: "#52e0a1",
+    azure: "#5caee3",
+    sunset: "#f7a36d",
+    crimson: "#ff6f7c",
+    indigo: "#6574ff",
+    aurora: "#b482ff",
+  };
+  const quickColors = ["#E74C3C", "#3498DB", "#F1C40F", "#2ECC71", "#9B59B6", "#E67E22"];
+  let propCardFrame = null;
 
-  elements.rollBtn.addEventListener("click", () => onIntent({ type: "ROLL_DICE" }));
-  elements.buyBtn.addEventListener("click", () => onIntent({ type: "BUY_PROPERTY" }));
-  elements.endBtn.addEventListener("click", () => onIntent({ type: "END_TURN" }));
-  elements.payBailBtn.addEventListener("click", () => onIntent({ type: "PAY_BAIL" }));
-  elements.useCardBtn.addEventListener("click", () => onIntent({ type: "USE_LEAVE_JAIL_CARD" }));
-  if (elements.buildBtn) {
-    elements.buildBtn.addEventListener("click", () => {
-      if (uiState.selectedTileId != null) {
-        onIntent({ type: "BUILD_HOUSE", payload: { tileId: uiState.selectedTileId } });
-      }
-    });
-  }
-  if (elements.sellBtn) {
-    elements.sellBtn.addEventListener("click", () => {
-      if (uiState.selectedTileId != null) {
-        onIntent({ type: "SELL_HOUSE", payload: { tileId: uiState.selectedTileId } });
-      }
-    });
-  }
   if (elements.mortgageBtn) {
     elements.mortgageBtn.addEventListener("click", () => {
       if (uiState.selectedTileId != null) {
@@ -58,11 +50,8 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       }
     });
   }
-  if (elements.tradeBtn) {
-    elements.tradeBtn.addEventListener("click", () => {
-      openTradePicker();
-      onIntent({ type: "OPEN_TRADE_PICKER" });
-    });
+  if (elements.appearanceBtn) {
+    elements.appearanceBtn.addEventListener("click", () => openAppearanceModal());
   }
   if (elements.tradeCreate) {
     elements.tradeCreate.addEventListener("click", () => {
@@ -158,8 +147,16 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
         onIntent({ type: "CLOSE_TRADE_UI" });
       } else if (uiState.tradeInboundOpen) {
         closeTradeInbound();
+      } else if (uiState.activePropTileId != null) {
+        closePropertyCard();
       }
     }
+  });
+  document.addEventListener("mousedown", (event) => {
+    if (!elements.propCard || elements.propCard.classList.contains("hidden")) return;
+    if (elements.propCard.contains(event.target)) return;
+    if (event.target.closest("[data-tile]")) return;
+    closePropertyCard();
   });
   if (elements.debtAutoBtn) {
     elements.debtAutoBtn.addEventListener("click", () => onIntent({ type: "AUTO_LIQUIDATE" }));
@@ -219,18 +216,6 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   } else if (elements.chatSend) {
     elements.chatSend.addEventListener("click", () => sendChatMessage());
   }
-  if (elements.startBtn) {
-    elements.startBtn.addEventListener("click", () => {
-      uiState.startOverlayDismissed = true;
-      if (elements.startOverlay) {
-        elements.startOverlay.classList.add("hidden");
-      }
-      openSetupModal();
-    });
-  }
-  if (elements.appearanceOpen) {
-    elements.appearanceOpen.addEventListener("click", () => openAppearanceModal());
-  }
   if (elements.appearanceSave) {
     elements.appearanceSave.addEventListener("click", () => saveAppearance());
   }
@@ -242,7 +227,19 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     uiState.selectedTileId = index;
     boardApi.setSelectedTile(index);
     renderTileDetail();
+    openPropertyCard(index, getState());
   });
+
+  window.addEventListener(
+    "resize",
+    () => schedulePropCardReposition(),
+    { passive: true }
+  );
+  window.addEventListener(
+    "orientationchange",
+    () => schedulePropCardReposition(),
+    { passive: true }
+  );
 
   elements.setupForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -257,7 +254,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   function refresh() {
     const state = getState();
     renderHeader(state);
-    renderButtons(state);
+    renderDock(state);
     renderPlayers(state);
     renderMyProperties(state);
     renderTileDetail(state);
@@ -275,10 +272,6 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
 
   function renderHeader(state) {
     const player = selectors.getCurrentPlayer(state);
-
-    if (Array.isArray(state.players) && state.players.length > 0) {
-      uiState.startOverlayDismissed = true;
-    }
 
     if (elements.currentPlayer) {
       if (player) {
@@ -309,41 +302,38 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     if (elements.doubleSetToggle) {
       elements.doubleSetToggle.checked = Boolean(state.config?.doubleSetRent);
     }
-    if (elements.appearanceOpen) {
-      elements.appearanceOpen.disabled = !player;
-    }
-
-    if (elements.turnInfo) {
-      let info = "";
-      if (player) {
-        if (player.bankrupt) {
-          info = `${player.name} is bankrupt.`;
-        } else if (player.inJail) {
-          const attempts = Math.max(0, player.jailTurns);
-          info = `${player.name} is in Jail (attempt ${attempts} of 3).`;
-        } else if (state.turn.pendingPurchase != null) {
-          const tile = tileData.find((t) => t.id === state.turn.pendingPurchase);
-          if (tile) {
-            info = `${player.name} can buy ${tile.name} for $${tile.price}.`;
-          }
-        } else if (state.turn.allowExtraRoll) {
-          info = "Roll again for doubles.";
-        }
-      }
-      elements.turnInfo.textContent = info;
+    if (elements.appearanceBtn) {
+      elements.appearanceBtn.disabled = !player;
     }
 
     if (elements.diceResult) {
+      let hint = "";
+      if (player) {
+        if (player.bankrupt) {
+          hint = `${player.name} is bankrupt.`;
+        } else if (player.inJail) {
+          const attempts = Math.max(0, player.jailTurns);
+          hint = `${player.name} is in Jail (attempt ${attempts} of 3).`;
+        } else if (state.turn.pendingPurchase != null) {
+          const tile = tileData.find((t) => t.id === state.turn.pendingPurchase);
+          if (tile) {
+            hint = `${player.name} can buy ${tile.name} for $${tile.price}.`;
+          }
+        } else if (state.turn.allowExtraRoll) {
+          hint = "Roll again for doubles.";
+        }
+      }
+
       if (state.turn.lastRoll && Array.isArray(state.turn.lastRoll.dice)) {
         const [d1, d2] = state.turn.lastRoll.dice;
         elements.diceResult.textContent = `🎲 ${d1} + ${d2} = ${state.turn.lastRoll.total}`;
+      } else if (hint) {
+        elements.diceResult.textContent = hint;
       } else {
         elements.diceResult.textContent = "Roll to start";
       }
     }
 
-    updateStartOverlay(state);
-    updateDiceOverlay(state);
 
     if (player) {
       uiState.selectedTileId ??= player.position;
@@ -351,84 +341,156 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     }
   }
 
-  function renderButtons(state) {
+  function renderDock(state) {
+    if (!elements.dockButtons) return;
+    const container = elements.dockButtons;
+    container.innerHTML = "";
+
     const player = selectors.getCurrentPlayer(state);
     const hasWinner = selectors.hasWinner(state);
-    const debtActive = Boolean(state.debtContext?.active);
-    const canRoll = !hasWinner && player && !player.bankrupt && state.turn.phase === "idle" && !debtActive;
-    const canBuy = !hasWinner && selectors.canBuyCurrentTile(state) && !debtActive;
-    const canEnd =
-      !hasWinner &&
-      player &&
-      !player.bankrupt &&
-      !debtActive &&
-      (state.turn.phase === "resolved" || state.turn.allowExtraRoll || state.turn.mustEnd);
-    const canPayBail = !hasWinner && player && player.inJail && !player.bankrupt && state.turn.phase === "idle" && player.cash >= state.config.bail;
-    const canUseCard = !hasWinner && player && player.inJail && player.heldCards.some((card) => card.kind === "leaveJail");
 
-    elements.rollBtn.disabled = !canRoll;
-    elements.buyBtn.disabled = !canBuy;
-    elements.endBtn.disabled = !canEnd;
-    elements.payBailBtn.disabled = !canPayBail;
-    elements.useCardBtn.disabled = !canUseCard;
-
-    renderBuildSellControls(state, player);
-
-    if (elements.tradeBtn) {
-      const activePlayers = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
-      const canTrade = !hasWinner && player && !player.bankrupt && activePlayers.length > 0;
-      elements.tradeBtn.disabled = !canTrade;
-      elements.tradeBtn.title = canTrade ? "Open trade builder" : "Trading unavailable";
-    }
-  }
-
-  function renderBuildSellControls(state, player) {
-    if (!elements.buildBtn || !elements.sellBtn) return;
-    const tileId = uiState.selectedTileId;
-    const tile = tileData.find((t) => t.id === tileId);
-    const isProperty = tile && tile.type === "property";
-    const playerId = player?.id ?? null;
-    const ownerId = isProperty ? state.tileOwnership?.[tileId] ?? state.tileOwnership?.[String(tileId)] : null;
-    const canInteract = Boolean(isProperty && playerId && ownerId === playerId && !player.bankrupt);
-
-    const buildClassTarget = elements.buildBtn.classList;
-    const sellClassTarget = elements.sellBtn.classList;
-    const hideControls = !isProperty || !canInteract;
-    buildClassTarget.toggle("hidden", hideControls);
-    sellClassTarget.toggle("hidden", hideControls);
-
-    if (hideControls) {
-      elements.buildBtn.disabled = true;
-      elements.sellBtn.disabled = true;
-      elements.buildBtn.removeAttribute("title");
-      elements.sellBtn.removeAttribute("title");
+    if (!player || hasWinner) {
       return;
     }
 
     const debtActive = Boolean(state.debtContext?.active);
-    const canBuild = canBuildHere(state, playerId, tileId);
-    const canSell = canSellHere(state, playerId, tileId);
-    elements.buildBtn.disabled = !canBuild || debtActive;
-    elements.sellBtn.disabled = !canSell;
+    const canRoll = state.turn.phase === "idle" && !player.bankrupt && !debtActive;
+    const canBuy = selectors.canBuyCurrentTile(state) && !debtActive && !player.bankrupt;
+    const canEnd =
+      !player.bankrupt &&
+      !debtActive &&
+      (state.turn.phase === "resolved" || state.turn.allowExtraRoll || state.turn.mustEnd);
+    const canPayBail =
+      player.inJail && !player.bankrupt && state.turn.phase === "idle" && player.cash >= state.config.bail && !debtActive;
+    const canUseCard = player.inJail && player.heldCards.some((card) => card.kind === "leaveJail");
 
-    const evenBlockedBuild =
-      !canBuild && state.config?.evenBuild && canBuildHere(overrideEvenBuild(state, false), playerId, tileId);
-    const evenBlockedSell =
-      !canSell && state.config?.evenBuild && canSellHere(overrideEvenBuild(state, false), playerId, tileId);
+    const tileId = uiState.selectedTileId ?? player.position;
+    const tile = tileData.find((t) => t.id === tileId);
+    const ownerId = tile ? state.tileOwnership?.[tileId] ?? state.tileOwnership?.[String(tileId)] : null;
+    const ownsTile =
+      tile && tile.type === "property" && ownerId === player.id && !player.bankrupt && !debtActive;
+    let buildTooltip = "";
+    let sellTooltip = "";
+    let canBuild = false;
+    let canSell = false;
 
-    if (elements.buildBtn.disabled && debtActive) {
-      elements.buildBtn.title = "Resolve debt before building.";
-    } else if (evenBlockedBuild) {
-      elements.buildBtn.title = "Even-Build: add houses evenly across the group.";
-    } else {
-      elements.buildBtn.removeAttribute("title");
+    if (ownsTile) {
+      canBuild = canBuildHere(state, player.id, tileId);
+      canSell = canSellHere(state, player.id, tileId);
+      const evenBlockedBuild =
+        !canBuild && state.config?.evenBuild && canBuildHere(overrideEvenBuild(state, false), player.id, tileId);
+      const evenBlockedSell =
+        !canSell && state.config?.evenBuild && canSellHere(overrideEvenBuild(state, false), player.id, tileId);
+      if (debtActive && !canBuild) {
+        buildTooltip = "Resolve debt before building.";
+      } else if (evenBlockedBuild) {
+        buildTooltip = "Even-Build: add houses evenly across the group.";
+      }
+      if (evenBlockedSell) {
+        sellTooltip = "Even-Build: remove houses evenly across the group.";
+      }
     }
 
-    if (evenBlockedSell) {
-      elements.sellBtn.title = "Even-Build: remove houses evenly across the group.";
-    } else {
-      elements.sellBtn.removeAttribute("title");
+    const activePlayers = selectors
+      .getActivePlayers(state)
+      .filter((p) => p.id !== player.id && !p.bankrupt);
+    const canTrade = !debtActive && activePlayers.length > 0;
+
+    const buyTile = state.turn.pendingPurchase != null ? tileData.find((t) => t.id === state.turn.pendingPurchase) : null;
+    let buyTitle = "";
+    if (!canBuy) {
+      if (!buyTile) {
+        buyTitle = "No property available to buy.";
+      } else if (debtActive) {
+        buyTitle = "Resolve debt before buying.";
+      } else if (player && buyTile.price > player.cash) {
+        buyTitle = "Not enough cash.";
+      }
     }
+
+    const actions = [
+      {
+        key: "roll",
+        label: "Roll",
+        variant: "primary",
+        disabled: !canRoll,
+        onClick: () => onIntent({ type: "ROLL_DICE" }),
+      },
+      {
+        key: "buy",
+        label: "Buy",
+        disabled: !canBuy,
+        title: buyTitle,
+        onClick: () => onIntent({ type: "BUY_PROPERTY" }),
+      },
+      {
+        key: "end",
+        label: "End",
+        disabled: !canEnd,
+        onClick: () => onIntent({ type: "END_TURN" }),
+      },
+      {
+        key: "payBail",
+        label: "Pay Bail",
+        disabled: !canPayBail,
+        onClick: () => onIntent({ type: "PAY_BAIL" }),
+      },
+      {
+        key: "useCard",
+        label: "Use Card",
+        disabled: !canUseCard,
+        onClick: () => onIntent({ type: "USE_LEAVE_JAIL_CARD" }),
+      },
+    ];
+
+    if (ownsTile) {
+      actions.push({
+        key: "build",
+        label: "Build +",
+        disabled: !canBuild,
+        title: buildTooltip,
+        onClick: () => onIntent({ type: "BUILD_HOUSE", payload: { tileId } }),
+      });
+      actions.push({
+        key: "sell",
+        label: "Sell −",
+        disabled: !canSell,
+        title: sellTooltip,
+        onClick: () => onIntent({ type: "SELL_HOUSE", payload: { tileId } }),
+      });
+    }
+
+    actions.push({
+      key: "trade",
+      label: "Trade",
+      disabled: !canTrade,
+      title: canTrade ? "Open trade builder" : "Need another active player",
+      onClick: () => {
+        openTradePicker();
+        onIntent({ type: "OPEN_TRADE_PICKER" });
+      },
+    });
+
+    actions.forEach((action) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      const classNames = ["btn"];
+      if (action.variant !== "primary") {
+        classNames.push("ghost");
+      }
+      btn.className = classNames.join(" ");
+      btn.textContent = action.label;
+      btn.disabled = Boolean(action.disabled);
+      if (action.title) {
+        btn.title = action.title;
+      } else {
+        btn.removeAttribute("title");
+      }
+      if (!btn.disabled && typeof action.onClick === "function") {
+        btn.addEventListener("click", action.onClick);
+      }
+      container.appendChild(btn);
+    });
   }
 
   function renderPlayers(state) {
@@ -520,6 +582,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     renderStructurePanel(state, tile);
     if (!tile) {
       elements.tileDetail.textContent = "Select a tile";
+      closePropertyCard();
       return;
     }
     const ownerId = state.tileOwnership?.[tileId];
@@ -559,6 +622,182 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       lines.push(`Pay: $${tile.tax}`);
     }
     elements.tileDetail.innerHTML = lines.map((line) => `<div>${line}</div>`).join("");
+    updatePropertyCard(state);
+  }
+
+  function openPropertyCard(tileId, state = getState()) {
+    if (!elements.propCard) return;
+    const tile = tileData.find((t) => t.id === tileId);
+    if (!tile) {
+      closePropertyCard();
+      return;
+    }
+
+    uiState.activePropTileId = tileId;
+    elements.propCard.innerHTML = buildPropertyCardContent(tile, state);
+    elements.propCard.classList.remove("hidden");
+    positionPropertyCard(tileId);
+  }
+
+  function updatePropertyCard(state = getState()) {
+    if (uiState.activePropTileId == null) return;
+    openPropertyCard(uiState.activePropTileId, state);
+  }
+
+  function closePropertyCard() {
+    if (!elements.propCard) return;
+    if (propCardFrame) {
+      cancelAnimationFrame(propCardFrame);
+      propCardFrame = null;
+    }
+    elements.propCard.classList.add("hidden");
+    elements.propCard.innerHTML = "";
+    uiState.activePropTileId = null;
+  }
+
+  function schedulePropCardReposition() {
+    if (propCardFrame) return;
+    propCardFrame = requestAnimationFrame(() => {
+      propCardFrame = null;
+      if (uiState.activePropTileId != null) {
+        updatePropertyCard(getState());
+      }
+    });
+  }
+
+  function showDice(dieOne, dieTwo, duration = 1200) {
+    if (!elements.diceOverlay) return;
+    elements.diceOverlay.innerHTML = "";
+    renderDiceOverlay(elements.diceOverlay, dieOne, dieTwo);
+    elements.diceOverlay.classList.remove("hidden");
+    clearTimeout(uiState.diceTimeout);
+    uiState.diceTimeout = window.setTimeout(() => {
+      elements.diceOverlay.classList.add("hidden");
+      elements.diceOverlay.innerHTML = "";
+    }, duration);
+  }
+
+  function buildPropertyCardContent(tile, state) {
+    const ownership = state.tileOwnership || {};
+    const ownerId = ownership[tile.id] ?? ownership[String(tile.id)];
+    const owner = state.players?.find((p) => p.id === ownerId);
+    const structures = state.structures?.[tile.id] ?? 0;
+    const mortgages = state.mortgages || {};
+    const isMortgaged = Boolean(mortgages[tile.id]);
+    const rents = Array.isArray(tile.rents) ? tile.rents : [];
+    const rentLabels = ["with rent", "with one house", "with two houses", "with three houses", "with four houses", "with a hotel"];
+
+    const swatch = tile.group ? `<span class="prop-swatch" style="background:${getGroupColor(tile.group)}"></span>` : "";
+    const header = `
+      <div class="prop-header">
+        ${swatch}
+        <h3>${escapeHtml(tile.name)}</h3>
+      </div>
+    `;
+
+    let body = "";
+    if (tile.type === "property") {
+      const rows = rents.map((rent, idx) => {
+        const label = rentLabels[idx] || `Level ${idx}`;
+        return `<div class="prop-row"><span class="when">${label}</span><span class="amt">$${rent}</span></div>`;
+      });
+      body = `<div class="rent-table">${rows.join("")}</div>`;
+    } else if (tile.type === "rail") {
+      const railRent = Array.isArray(tile.rent) ? tile.rent : [];
+      const rows = [1, 2, 3, 4].map((count, idx) => {
+        const rent = railRent[idx] ?? railRent[railRent.length - 1] ?? 0;
+        return `<div class="prop-row"><span class="when">owns ${count} rail${count === 1 ? "" : "s"}</span><span class="amt">$${rent}</span></div>`;
+      });
+      body = `<div class="rent-table">${rows.join("")}</div>`;
+    } else if (tile.type === "utility") {
+      body = `
+        <div class="rent-table">
+          <div class="prop-row"><span class="when">owns one utility</span><span class="amt">4× dice</span></div>
+          <div class="prop-row"><span class="when">owns both utilities</span><span class="amt">10× dice</span></div>
+        </div>
+      `;
+    } else if (tile.type === "tax") {
+      body = `<div class="prop-row"><span class="when">Tax due</span><span class="amt">$${tile.tax}</span></div>`;
+    } else if (tile.type === "surprise" || tile.type === "treasure") {
+      body = `<div class="prop-row"><span class="when">Draw a card</span><span class="amt">${tile.type === "surprise" ? "Surprise" : "Treasure"}</span></div>`;
+    } else {
+      body = `<div class="prop-row"><span class="when">Tile type</span><span class="amt">${formatTileType(tile.type)}</span></div>`;
+    }
+
+    const ownerLine = owner
+      ? `<div class="owner"><span class="prop-swatch" style="background:${owner.color}"></span><span>${escapeHtml(owner.name)}</span></div>`
+      : `<div class="owner"><span class="prop-swatch" style="background:#444"></span><span>Bank</span></div>`;
+    const structureLine =
+      tile.type === "property"
+        ? `<div class="prop-row"><span class="when">Structures</span><span class="amt">${structures === 5 ? "Hotel" : `${structures} house${structures === 1 ? "" : "s"}`}</span></div>`
+        : "";
+    const footer = `
+      <div class="prop-footer">
+        ${ownerLine}
+        <div class="prop-row"><span class="when">Price</span><span class="amt">${tile.price ? `$${tile.price}` : "—"}</span></div>
+        ${tile.houseCost ? `<div class="prop-row"><span class="when">House cost</span><span class="amt">$${tile.houseCost}</span></div>` : ""}
+        ${tile.mortgage ? `<div class="prop-row"><span class="when">Mortgage</span><span class="amt">${isMortgaged ? "Mortgaged" : `$${tile.mortgage}`}</span></div>` : ""}
+        ${structureLine}
+      </div>
+    `;
+
+    return `${header}${body}${footer}`;
+  }
+
+  function positionPropertyCard(tileId) {
+    if (!elements.propCard) return;
+    const card = elements.propCard;
+    const anchor = boardApi.getTileScreenPos ? boardApi.getTileScreenPos(tileId) : null;
+    if (!anchor) return;
+    const stageRect = elements.stage ? elements.stage.getBoundingClientRect() : document.body.getBoundingClientRect();
+
+    card.style.left = "0px";
+    card.style.top = "0px";
+    card.classList.remove("hidden");
+
+    const cardRect = card.getBoundingClientRect();
+    const margin = 12;
+    const placements = [
+      {
+        top: anchor.y - cardRect.height - margin,
+        left: anchor.x - cardRect.width / 2,
+      },
+      {
+        top: anchor.y + margin,
+        left: anchor.x - cardRect.width / 2,
+      },
+      {
+        top: anchor.y - cardRect.height / 2,
+        left: anchor.x + margin,
+      },
+      {
+        top: anchor.y - cardRect.height / 2,
+        left: anchor.x - cardRect.width - margin,
+      },
+    ];
+
+    let chosen = placements.find(
+      (pos) =>
+        pos.left >= stageRect.left + margin &&
+        pos.left + cardRect.width <= stageRect.right - margin &&
+        pos.top >= stageRect.top + margin &&
+        pos.top + cardRect.height <= stageRect.bottom - margin
+    );
+
+    if (!chosen) {
+      chosen = placements[0];
+      chosen.left = Math.min(
+        Math.max(chosen.left, stageRect.left + margin),
+        stageRect.right - cardRect.width - margin
+      );
+      chosen.top = Math.min(
+        Math.max(chosen.top, stageRect.top + margin),
+        stageRect.bottom - cardRect.height - margin
+      );
+    }
+
+    card.style.left = `${Math.round(chosen.left)}px`;
+    card.style.top = `${Math.round(chosen.top)}px`;
   }
 
   function renderFinanceControls(state) {
@@ -972,9 +1211,9 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   }
 
   function renderMyProperties(state) {
-    if (!elements.myPropertiesList) return;
+    if (!elements.myProps) return;
     const player = selectors.getCurrentPlayer(state);
-    elements.myPropertiesList.innerHTML = "";
+    elements.myProps.innerHTML = "";
     if (!player) return;
 
     const owned = player.owned
@@ -985,7 +1224,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       const empty = document.createElement("div");
       empty.className = "chip small";
       empty.textContent = "No properties";
-      elements.myPropertiesList.appendChild(empty);
+      elements.myProps.appendChild(empty);
       return;
     }
 
@@ -993,7 +1232,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       const chip = document.createElement("span");
       chip.className = "chip small";
       chip.textContent = `${tile.name} — $${tile.price || 0}`;
-      elements.myPropertiesList.appendChild(chip);
+      elements.myProps.appendChild(chip);
     });
   }
 
@@ -1404,39 +1643,6 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     elements.chatInput.value = "";
   }
 
-  function updateStartOverlay(state) {
-    if (!elements.startOverlay) return;
-    const shouldShow = !uiState.startOverlayDismissed && (!state.players || state.players.length === 0);
-    elements.startOverlay.classList.toggle("hidden", !shouldShow);
-  }
-
-  function updateDiceOverlay(state) {
-    if (!elements.diceOverlay) return;
-    const lastRoll = state.turn.lastRoll;
-    if (lastRoll && Array.isArray(lastRoll.dice)) {
-      const key = `${lastRoll.dice.join("-")}-${lastRoll.total}`;
-      if (uiState.diceOverlayKey !== key) {
-        uiState.diceOverlayKey = key;
-        renderDiceOverlay(elements.diceOverlay, lastRoll.dice[0], lastRoll.dice[1]);
-        if (uiState.diceTimeout) {
-          clearTimeout(uiState.diceTimeout);
-        }
-        uiState.diceTimeout = setTimeout(() => {
-          if (elements.diceOverlay) {
-            elements.diceOverlay.classList.remove("visible");
-          }
-        }, 1200);
-      }
-    } else {
-      uiState.diceOverlayKey = null;
-      if (uiState.diceTimeout) {
-        clearTimeout(uiState.diceTimeout);
-        uiState.diceTimeout = null;
-      }
-      elements.diceOverlay.classList.remove("visible");
-    }
-  }
-
   function openAppearanceModal() {
     if (!elements.appearanceModal) return;
     const player = selectors.getCurrentPlayer(getState());
@@ -1739,6 +1945,20 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     return group.replace(/\b\w/g, (letter) => letter.toUpperCase());
   }
 
+  function getGroupColor(group) {
+    if (!group) return "#4a4860";
+    return groupPalette[group.toLowerCase()] || "#4a4860";
+  }
+
+  function quickStart(count = 4) {
+    const capped = Math.max(2, Math.min(count, 6));
+    const players = Array.from({ length: capped }).map((_, idx) => ({
+      name: `Player ${idx + 1}`,
+      color: quickColors[idx % quickColors.length],
+    }));
+    onIntent({ type: "NEW_GAME", payload: { players } });
+  }
+
   renderSetupExtras();
   rebuildPlayerConfig();
 
@@ -1765,5 +1985,8 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       closeTradeInbound();
       onIntent({ type: "CLOSE_TRADE_UI" });
     },
+    showDice,
+    quickStart,
+    closePropertyCard,
   };
 }

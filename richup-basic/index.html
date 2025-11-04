@@ -31,7 +31,7 @@
   </svg>
 
   <main id="shell" class="shell">
-    <header class="app-header">
+    <header class="header">
       <div class="brand">
         <span class="brand-badge">R</span>
         <span>RICHUP Prototype</span>
@@ -58,7 +58,7 @@
               Share this game
             </div>
           </header>
-          <div class="share-body">
+          <div class="card-body share-body">
             <input id="share-url" class="share-input" type="text" readonly>
             <button id="share-copy" class="btn ghost" type="button">Copy</button>
           </div>
@@ -71,10 +71,10 @@
               Chat
             </div>
           </header>
-          <div class="chat-body scrolly">
+          <div class="card-body chat-body scrolly">
             <ul id="chat-list" class="chat-list"></ul>
           </div>
-          <form class="chat-composer" id="chat-form">
+          <form class="card-footer chat-composer" id="chat-form">
             <input id="chat-input" type="text" placeholder="Say something…" autocomplete="off">
             <button id="chat-send" class="icon-btn send" type="submit" aria-label="Send message">
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#send"></use></svg>
@@ -84,14 +84,15 @@
       </aside>
 
       <section id="center-col" class="column">
-        <section id="stage">
+        <section id="stage" class="stage">
           <svg id="board-svg" viewBox="0 0 800 800" role="img" aria-label="Richup board"></svg>
+          <div id="dice-result" class="dice-result">Roll to start</div>
           <div id="dice-overlay" class="dice-overlay"></div>
           <div id="action-dock" class="action-dock">
-            <div class="dock" role="toolbar" aria-label="Turn actions"></div>
+            <div id="dock-buttons" class="dock" role="toolbar" aria-label="Turn actions"></div>
           </div>
           <div id="start-overlay" class="start-overlay">
-            <button id="start-btn" class="btn primary">Start Game</button>
+            <button id="start-btn" class="btn xl">Start Game</button>
           </div>
         </section>
         <div id="prop-card" class="card prop-card hidden" role="dialog" aria-modal="true" aria-live="polite"></div>
@@ -104,10 +105,12 @@
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#users"></use></svg>
               Players
             </div>
-            <button id="appearance-open" class="btn ghost sm" type="button">Change appearance</button>
+            <button id="appearance-btn" class="btn ghost sm" type="button">Change appearance</button>
           </header>
-          <div id="current-player" class="current-player-chip"></div>
-          <ul id="player-list" class="players-list scrolly" tabindex="0"></ul>
+          <div class="card-body">
+            <div id="current-player" class="current-player-chip"></div>
+            <ul id="player-list" class="players-list scrolly" tabindex="0"></ul>
+          </div>
         </section>
 
         <section id="trades-card" class="card trades-card">
@@ -118,7 +121,9 @@
             </div>
             <button id="trade-create" class="btn primary sm" type="button">Create</button>
           </header>
-          <ul id="trade-threads" class="trades-list scrolly"></ul>
+          <div class="card-body">
+            <ul id="trade-threads" class="trades-list scrolly"></ul>
+          </div>
         </section>
 
         <section id="props-card" class="card properties-card">
@@ -128,10 +133,13 @@
               My properties
             </div>
           </header>
-          <div class="properties-body scrolly">
-            <ul id="my-properties-list" class="chip-list"></ul>
+          <div class="card-body properties-body scrolly">
+            <ul id="my-props" class="chip-list"></ul>
+            <div id="structure-icons" class="structure-icons"></div>
+            <div id="structure-info" class="structure-info"></div>
+            <div id="tile-detail" class="tile-detail"></div>
           </div>
-          <footer class="finance-footer">
+          <footer id="finance-panel" class="card-footer finance-footer hidden">
             <button id="mortgage-btn" class="btn ghost" type="button" disabled>Mortgage</button>
             <button id="unmortgage-btn" class="btn ghost" type="button" disabled>Unmortgage</button>
           </footer>
@@ -144,7 +152,7 @@
               Game settings
             </div>
           </header>
-          <div class="settings-body scrolly">
+          <div class="card-body settings-body scrolly">
             <div class="setting-row">
               <span class="setting-label">Maximum players</span>
               <span class="setting-value" id="max-players-label">—</span>
@@ -160,7 +168,9 @@
               <span class="toggle-label">Even-Build rule <span id="even-build-status">ON</span></span>
             </label>
           </div>
-          <button id="new-game-btn" class="btn primary full" type="button">New Game</button>
+          <div class="card-footer">
+            <button id="new-game-btn" class="btn primary full" type="button">New Game</button>
+          </div>
         </section>
       </aside>
     </div>

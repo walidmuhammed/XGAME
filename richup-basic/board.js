@@ -1,18 +1,19 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const BOARD_SIZE = 600;
-const CORNER_SIZE = 110;
+const BOARD_SIZE = 800;
+const CORNER_SIZE = 150;
 const EDGE_COUNT = 9;
 const EDGE_SIZE = (BOARD_SIZE - CORNER_SIZE * 2) / EDGE_COUNT;
 const SLOT_OFFSETS = [
   [0, 0],
-  [-14, -14],
-  [14, 14],
-  [-14, 14],
-  [14, -14],
-  [0, -24],
+  [-18, -18],
+  [18, 18],
   [-18, 18],
   [18, -18],
+  [0, -32],
+  [-24, 24],
+  [24, -24],
 ];
+const LABEL_OUTLINE = "rgba(15, 14, 23, 0.65)";
 
 const PIP_POSITIONS = {
   1: [
@@ -497,6 +498,7 @@ export function createBoard(svgEl, tiles = BOARD_TILES) {
   return {
     getTiles: () => boardState.tiles,
     getTileCenter,
+    getTileScreenPos,
     setSelectedTile,
     updateOwnership,
     updateStructures,
@@ -647,6 +649,19 @@ export function onTileSelect(handler) {
 export function getTileCenter(tileId) {
   ensureBoard();
   return boardState.tileCenters[tileId];
+}
+
+function getTileScreenPos(tileId) {
+  ensureBoard();
+  const center = boardState.tileCenters[tileId];
+  if (!center) return null;
+  const rect = boardState.svg.getBoundingClientRect();
+  const scaleX = rect.width / BOARD_SIZE;
+  const scaleY = rect.height / BOARD_SIZE;
+  return {
+    x: rect.left + center.x * scaleX,
+    y: rect.top + center.y * scaleY,
+  };
 }
 
 export function getGroupTiles(tiles, group) {
@@ -806,22 +821,35 @@ function buildTileElement(tile, rect, index) {
   label.classList.add("tile-label");
   label.setAttribute("text-anchor", "middle");
   label.setAttribute("dominant-baseline", "middle");
-  label.setAttribute("fill", "#e8e9f1");
-  label.setAttribute("font-size", tile.type === "property" ? "11" : "12");
+  label.setAttribute("fill", "#eceef8");
+  label.setAttribute("paint-order", "stroke");
+  label.setAttribute("stroke", LABEL_OUTLINE);
+  label.setAttribute("stroke-width", "3");
+  label.setAttribute("stroke-linejoin", "round");
+  label.setAttribute("font-size", tile.type === "property" ? "13" : "14");
 
-  let textX = rect.x + rect.width / 2;
-  let textY = rect.y + rect.height / 2;
+  const textX = rect.x + rect.width / 2;
+  const textY = rect.y + rect.height / 2;
+  const horizontal = rect.orientation === "bottom" || rect.orientation === "top" || rect.orientation === "corner-bottom" || rect.orientation === "corner-top";
   if (rect.orientation === "left") {
     label.setAttribute("transform", `rotate(90 ${textX} ${textY})`);
   } else if (rect.orientation === "right") {
     label.setAttribute("transform", `rotate(-90 ${textX} ${textY})`);
   }
 
-  const lines = wrapLabel(tile.name);
+  const maxChars = horizontal ? Math.max(10, Math.floor(rect.width / 9)) : 12;
+  const maxLines = horizontal ? 1 : 2;
+  const lines = wrapLabel(tile.name, maxChars, maxLines);
+
+  if (horizontal) {
+    label.setAttribute("textLength", Math.max(24, rect.width - 24));
+    label.setAttribute("lengthAdjust", "spacingAndGlyphs");
+  }
+
   lines.forEach((line, lineIndex) => {
     const tspan = document.createElementNS(SVG_NS, "tspan");
     tspan.setAttribute("x", textX);
-    tspan.setAttribute("dy", lineIndex === 0 ? "0" : "1.1em");
+    tspan.setAttribute("dy", lineIndex === 0 ? "0" : "1.2em");
     tspan.textContent = line;
     label.appendChild(tspan);
   });
@@ -834,7 +862,10 @@ function buildTileElement(tile, rect, index) {
     price.classList.add("tile-price");
     price.setAttribute("text-anchor", "middle");
     price.setAttribute("fill", "#b7bac7");
-    price.setAttribute("font-size", "10");
+    price.setAttribute("paint-order", "stroke");
+    price.setAttribute("stroke", LABEL_OUTLINE);
+    price.setAttribute("stroke-width", "2");
+    price.setAttribute("font-size", "11");
 
     if (rect.orientation === "bottom") {
       price.setAttribute("x", rect.x + rect.width / 2);
@@ -876,13 +907,13 @@ function buildTileElement(tile, rect, index) {
   return group;
 }
 
-function wrapLabel(text) {
-  const words = text.split(" ");
+function wrapLabel(text, maxLength = 12, maxLines = 2) {
+  const words = String(text || "").split(/\s+/);
   const lines = [];
   let current = "";
   words.forEach((word) => {
     const next = current ? `${current} ${word}` : word;
-    if (next.length > 12 && current) {
+    if (next.length > maxLength && current) {
       lines.push(current);
       current = word;
     } else {
@@ -890,7 +921,13 @@ function wrapLabel(text) {
     }
   });
   if (current) lines.push(current);
-  return lines.slice(0, 3);
+  if (lines.length > maxLines) {
+    const trimmed = lines.slice(0, maxLines);
+    const last = trimmed[trimmed.length - 1] || "";
+    trimmed[trimmed.length - 1] = `${last.slice(0, Math.max(0, maxLength - 1))}…`;
+    return trimmed;
+  }
+  return lines;
 }
 
 function createOwnerMarker(rect) {

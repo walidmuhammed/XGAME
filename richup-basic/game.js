@@ -14,29 +14,23 @@ const STORAGE_KEY = "richup-basic-save";
 
 const elements = {
   boardSvg: document.getElementById("board-svg"),
-  rollBtn: document.getElementById("roll-btn"),
-  buyBtn: document.getElementById("buy-btn"),
-  endBtn: document.getElementById("end-btn"),
-  payBailBtn: document.getElementById("pay-bail-btn"),
-  useCardBtn: document.getElementById("use-card-btn"),
-  buildBtn: document.getElementById("build-btn"),
-  sellBtn: document.getElementById("sell-btn"),
+  centerCol: document.getElementById("center-col"),
+  stage: document.getElementById("stage"),
+  dockButtons: document.getElementById("dock-buttons"),
+  diceOverlay: document.getElementById("dice-overlay"),
   diceResult: document.getElementById("dice-result"),
-  currentPlayer: document.getElementById("current-player"),
-  turnInfo: document.getElementById("turn-info"),
+  startOverlay: document.getElementById("start-overlay"),
+  startBtn: document.getElementById("start-btn"),
+  propCard: document.getElementById("prop-card"),
   shareUrl: document.getElementById("share-url"),
   shareCopy: document.getElementById("share-copy"),
   chatList: document.getElementById("chat-list"),
   chatForm: document.getElementById("chat-form"),
   chatInput: document.getElementById("chat-input"),
   chatSend: document.getElementById("chat-send"),
-  tileDetail: document.getElementById("tile-detail"),
-  structureIcons: document.getElementById("structure-icons"),
-  structureInfo: document.getElementById("structure-info"),
-  financePanel: document.getElementById("finance-panel"),
-  mortgageBtn: document.getElementById("mortgage-btn"),
-  unmortgageBtn: document.getElementById("unmortgage-btn"),
-  tradeBtn: document.getElementById("trade-btn"),
+  currentPlayer: document.getElementById("current-player"),
+  playerList: document.getElementById("player-list"),
+  appearanceBtn: document.getElementById("appearance-btn"),
   tradeCreate: document.getElementById("trade-create"),
   tradeThreads: document.getElementById("trade-threads"),
   tradePickModal: document.getElementById("trade-pick-player"),
@@ -60,16 +54,18 @@ const elements = {
   tradeInboundDecline: document.getElementById("trade-inbound-decline"),
   tradeInboundClose: document.getElementById("trade-inbound-close"),
   tradeInboundNote: document.getElementById("trade-inbound-note"),
-  myPropertiesList: document.getElementById("my-properties-list"),
-  playerList: document.getElementById("player-list"),
-  logList: document.getElementById("log-list"),
-  newGameBtn: document.getElementById("new-game-btn"),
+  myProps: document.getElementById("my-props"),
+  structureIcons: document.getElementById("structure-icons"),
+  structureInfo: document.getElementById("structure-info"),
+  tileDetail: document.getElementById("tile-detail"),
+  financePanel: document.getElementById("finance-panel"),
+  mortgageBtn: document.getElementById("mortgage-btn"),
+  unmortgageBtn: document.getElementById("unmortgage-btn"),
+  maxPlayersLabel: document.getElementById("max-players-label"),
+  doubleSetToggle: document.getElementById("double-set-toggle"),
   evenBuildToggle: document.getElementById("even-build-toggle"),
   evenBuildStatus: document.getElementById("even-build-status"),
-  doubleSetToggle: document.getElementById("double-set-toggle"),
-  diceOverlay: document.getElementById("dice-overlay"),
-  startOverlay: document.getElementById("start-overlay"),
-  startBtn: document.getElementById("start-btn"),
+  newGameBtn: document.getElementById("new-game-btn"),
   debtModal: document.getElementById("debt-modal"),
   debtSummary: document.getElementById("debt-summary"),
   debtSellList: document.getElementById("debt-sell-list"),
@@ -91,16 +87,17 @@ const elements = {
   winText: document.getElementById("win-text"),
   winOkBtn: document.getElementById("win-ok-btn"),
   appearanceModal: document.getElementById("appearance-modal"),
-  appearanceOpen: document.getElementById("appearance-open"),
   appearanceName: document.getElementById("appearance-name"),
   appearanceColor: document.getElementById("appearance-color"),
   appearanceSave: document.getElementById("appearance-save"),
   appearanceCancel: document.getElementById("appearance-cancel"),
-  maxPlayersLabel: document.getElementById("max-players-label"),
   toastRoot: document.getElementById("toast-root"),
 };
 
 let state = createInitialState();
+const rootEl = document.documentElement;
+let resizeFrame = null;
+
 const boardApi = createBoard(elements.boardSvg, BOARD_TILES);
 const ui = createUI({
   elements,
@@ -116,6 +113,18 @@ const DEBT_BLOCKED_INTENTS = new Set(["ROLL_DICE", "BUY_PROPERTY", "END_TURN"]);
 init();
 
 function init() {
+  scheduleBoardResize();
+  window.addEventListener("resize", scheduleBoardResize, { passive: true });
+  window.addEventListener("orientationchange", scheduleBoardResize, { passive: true });
+
+  if (elements.startBtn) {
+    elements.startBtn.addEventListener("click", () => {
+      if (typeof ui.openSetup === "function") {
+        ui.openSetup();
+      }
+    });
+  }
+
   const restored = loadState();
   if (restored && Array.isArray(restored.players) && restored.players.length >= 2) {
     state = restored;
@@ -129,9 +138,41 @@ function init() {
     const active = selectors.getCurrentPlayer(state);
     ui.setSelectedTile(active ? active.position : 0);
     ui.refresh();
+    hideStartOverlay();
   } else {
+    showStartOverlay();
     ui.openSetup();
     ui.refresh();
+  }
+}
+
+function scheduleBoardResize() {
+  if (resizeFrame !== null) return;
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null;
+    updateBoardSize();
+  });
+}
+
+function updateBoardSize() {
+  if (!elements.centerCol) return;
+  const rect = elements.centerCol.getBoundingClientRect();
+  const inset = 48;
+  const availableWidth = Math.max(320, rect.width - inset);
+  const availableHeight = Math.max(320, rect.height - inset);
+  const size = Math.max(480, Math.floor(Math.min(availableWidth, availableHeight)));
+  rootEl.style.setProperty("--boardSize", `${size}px`);
+}
+
+function hideStartOverlay() {
+  if (elements.startOverlay) {
+    elements.startOverlay.classList.add("hidden");
+  }
+}
+
+function showStartOverlay() {
+  if (elements.startOverlay) {
+    elements.startOverlay.classList.remove("hidden");
   }
 }
 
@@ -170,30 +211,41 @@ async function dispatch(intent) {
     if (ui.resetChat) {
       ui.resetChat();
     }
+    if (ui.closePropertyCard) {
+      ui.closePropertyCard();
+    }
     ui.setSelectedTile(0);
     ui.refresh();
+    hideStartOverlay();
+    scheduleBoardResize();
     saveState();
-    return;
-  }
+  return;
+}
 
-  if (intent.type === "ROLL_DICE") {
-    ui.refresh();
-    saveState();
-    await runMovementSequence(previous, next);
-    syncTokenPositions();
-    updateOwnership(state.tileOwnership);
-    syncStructures();
-    syncMortgages();
-    ui.refresh();
-    return;
+if (intent.type === "ROLL_DICE") {
+  ui.refresh();
+  const lastRoll = next.turn?.lastRoll;
+  if (lastRoll && Array.isArray(lastRoll.dice) && typeof ui.showDice === "function") {
+    ui.showDice(lastRoll.dice[0], lastRoll.dice[1], 1200);
   }
-
   saveState();
+  await runMovementSequence(previous, next);
   syncTokenPositions();
   updateOwnership(state.tileOwnership);
   syncStructures();
   syncMortgages();
   ui.refresh();
+  scheduleBoardResize();
+  return;
+}
+
+saveState();
+syncTokenPositions();
+updateOwnership(state.tileOwnership);
+syncStructures();
+syncMortgages();
+ui.refresh();
+scheduleBoardResize();
 }
 
 function ensureTokenLayer() {
