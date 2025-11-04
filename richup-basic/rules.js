@@ -49,7 +49,7 @@ export function createInitialState(config = {}) {
     },
     log: [],
     config: mergedConfig,
-    pendingTrade: null,
+    trade: createEmptyTrade(),
     debtContext: {
       active: false,
       amountOwed: 0,
@@ -60,7 +60,6 @@ export function createInitialState(config = {}) {
       rngSeed: null,
       seed: null,
       logCounter: 0,
-      tradeCounter: 0,
     },
   };
 }
@@ -98,9 +97,11 @@ export function stepTurn(state, intent) {
     case "ACCEPT_TRADE":
       return handleAcceptTrade(state);
     case "DECLINE_TRADE":
-      return handleDeclineTrade(state);
+      return handleDeclineTrade(state, "decline");
     case "CANCEL_TRADE":
-      return handleCancelTrade(state);
+      return handleDeclineTrade(state, "cancel");
+    case "CLOSE_TRADE":
+      return handleCloseTrade(state);
     case "BEGIN_DEBT_RESOLUTION":
       return handleBeginDebtResolution(state, intent.payload || {});
     case "AUTO_LIQUIDATE":
@@ -124,7 +125,12 @@ export const selectors = {
   getHouseCount: (state, tileId) => state.structures?.[tileId] ?? 0,
   getConfig: (state) => state.config,
   getMortgages: (state) => state.mortgages,
-  getPendingTrade: (state) => state.pendingTrade,
+  getTrade: (state) => state.trade || createEmptyTrade(),
+  getPlayerById: (state, id) => state.players.find((p) => p.id === id) || null,
+  getOwnedProperties: (state, playerId) =>
+    Object.keys(state.tileOwnership || {})
+      .filter((key) => state.tileOwnership[key] === playerId)
+      .map((key) => Number(key)),
   getDebtContext: (state) => state.debtContext,
   hasWinner: (state) => Boolean(state.meta.winner),
 };
@@ -157,6 +163,7 @@ function startNewGame(prevState, payload) {
   base.structures = createEmptyStructures();
   base.mortgages = createEmptyMortgages();
   base.turn = createInitialTurn();
+  base.trade = createEmptyTrade();
 
   if (payload.seed) {
     base.meta.seed = String(payload.seed);
@@ -172,14 +179,11 @@ function startNewGame(prevState, payload) {
   };
 
   base.config.evenBuild = payload.evenBuild ?? true;
-  base.pendingTrade = null;
   base.debtContext = {
     active: false,
     amountOwed: 0,
     creditor: null,
   };
-  base.meta.tradeCounter = 0;
-
   pushLog(base, `New game: ${players.length} players ready.`);
   return base;
 }
@@ -445,132 +449,65 @@ function handleOpenTrade(state, payload) {
   const next = cloneState(state);
   const player = getCurrentPlayer(next);
   if (!player || player.bankrupt) return next;
+  if (next.trade?.active) return next;
   const partnerId = payload?.partnerId;
   const partner = findPlayerById(next, partnerId);
   if (!partner || partner.bankrupt || partner.id === player.id) return next;
-  next.pendingTrade = {
-    id: createTradeId(next),
-    from: player.id,
-    to: partner.id,
-    offer: { cash: 0, properties: [] },
-    request: { cash: 0, properties: [] },
-    status: "proposed",
-    awaiting: partner.id,
-  };
-  pushLog(next, `${player.name} opens a trade discussion with ${partner.name}.`);
+  next.trade = createEmptyTrade();
+  next.trade.active = true;
+  next.trade.initiatorId = player.id;
+  next.trade.partnerId = partner.id;
+  next.trade.status = "idle";
+  pushLog(next, `${player.name} opened a trade with ${partner.name}.`);
   return next;
+}
+
+function handleCloseTrade(state) {
+  return cloneState(state);
 }
 
 function handleProposeTrade(state, payload) {
-  const next = cloneState(state);
-  const player = getCurrentPlayer(next);
-  if (!player || player.bankrupt) return next;
-  const trade = next.pendingTrade;
-  if (!trade || trade.from !== player.id) return next;
-  const offer = normalizeTradeSide(next, trade.from, payload?.offer);
-  const request = normalizeTradeSide(next, trade.to, payload?.request);
-  trade.offer = offer;
-  trade.request = request;
-  trade.status = "proposed";
-  trade.awaiting = trade.to;
-  const partner = findPlayerById(next, trade.to);
-  if (partner) {
-    pushLog(next, `${player.name} proposes a trade with ${partner.name}.`);
-  }
-  return next;
+  return proposeOrCounterTrade(state, payload, "propose");
 }
 
 function handleCounterTrade(state, payload) {
-  const next = cloneState(state);
-  const player = getCurrentPlayer(next);
-  if (!player || player.bankrupt) return next;
-  const trade = next.pendingTrade;
-  if (!trade || trade.to !== player.id) return next;
-  const offer = normalizeTradeSide(next, trade.from, payload?.offer);
-  const request = normalizeTradeSide(next, trade.to, payload?.request);
-  trade.offer = offer;
-  trade.request = request;
-  trade.status = "countered";
-  trade.awaiting = trade.from;
-  const initiator = findPlayerById(next, trade.from);
-  if (initiator) {
-    pushLog(next, `${player.name} counters the trade proposal from ${initiator.name}.`);
-  }
-  return next;
-}
-
-function handleDeclineTrade(state) {
-  const next = cloneState(state);
-  const player = getCurrentPlayer(next);
-  if (!player) return next;
-  const trade = next.pendingTrade;
-  if (!trade) return next;
-  if (trade.awaiting !== player.id && trade.from !== player.id && trade.to !== player.id) return next;
-  const otherId = trade.from === player.id ? trade.to : trade.from;
-  const other = findPlayerById(next, otherId);
-  if (other) {
-    pushLog(next, `${player.name} declines the trade with ${other.name}.`);
-  }
-  next.pendingTrade = null;
-  return next;
-}
-
-function handleCancelTrade(state) {
-  const next = cloneState(state);
-  const player = getCurrentPlayer(next);
-  if (!player) return next;
-  const trade = next.pendingTrade;
-  if (!trade || trade.from !== player.id) return next;
-  const partner = findPlayerById(next, trade.to);
-  if (partner) {
-    pushLog(next, `${player.name} cancels the trade with ${partner.name}.`);
-  }
-  next.pendingTrade = null;
-  return next;
+  return proposeOrCounterTrade(state, payload, "counter");
 }
 
 function handleAcceptTrade(state) {
   const next = cloneState(state);
-  const responder = getCurrentPlayer(next);
-  if (!responder || responder.bankrupt) return next;
-  const trade = next.pendingTrade;
-  if (!trade || trade.awaiting !== responder.id) return next;
+  const trade = next.trade;
+  const actor = getCurrentPlayer(next);
+  if (!trade?.active || !actor || actor.bankrupt) return next;
 
-  const initiator = findPlayerById(next, trade.from);
-  const partner = findPlayerById(next, trade.to);
+  const initiator = findPlayerById(next, trade.initiatorId);
+  const partner = findPlayerById(next, trade.partnerId);
   if (!initiator || !partner || initiator.bankrupt || partner.bankrupt) {
-    next.pendingTrade = null;
+    next.trade = createEmptyTrade();
     return next;
   }
 
-  const offer = normalizeTradeSide(next, trade.from, trade.offer);
-  const request = normalizeTradeSide(next, trade.to, trade.request);
+  const awaitingId = getTradeAwaitingId(trade);
+  if (awaitingId !== actor.id) return next;
 
-  if (offer.properties.length !== trade.offer.properties.length || request.properties.length !== trade.request.properties.length) {
-    // underlying ownership changed; invalidate trade
-    next.pendingTrade = null;
-    pushLog(next, `Trade canceled because terms are no longer valid.`);
+  if (!validateTradeOwnershipAndCash(next, trade)) {
+    pushLog(next, "Trade canceled: terms are no longer valid.");
+    next.trade = createEmptyTrade();
     return next;
   }
 
-  const fromCashAfter = initiator.cash - offer.cash + request.cash;
-  const toCashAfter = partner.cash - request.cash + offer.cash;
-  if (fromCashAfter < 0 || toCashAfter < 0) {
-    pushLog(next, `Trade rejected: insufficient funds to complete the exchange.`);
+  const offer = trade.offer;
+  const request = trade.request;
+
+  const initiatorCashAfter = initiator.cash - offer.cash + request.cash;
+  const partnerCashAfter = partner.cash - request.cash + offer.cash;
+  if (initiatorCashAfter < 0 || partnerCashAfter < 0) {
+    pushLog(next, "Trade rejected: insufficient cash after exchange.");
     return next;
   }
 
-  // final validation that properties still owned
-  const offerValid = offer.properties.every((tileId) => next.tileOwnership[tileId] === initiator.id);
-  const requestValid = request.properties.every((tileId) => next.tileOwnership[tileId] === partner.id);
-  if (!offerValid || !requestValid) {
-    next.pendingTrade = null;
-    pushLog(next, `Trade canceled because property ownership changed.`);
-    return next;
-  }
-
-  initiator.cash = fromCashAfter;
-  partner.cash = toCashAfter;
+  initiator.cash = initiatorCashAfter;
+  partner.cash = partnerCashAfter;
 
   offer.properties.forEach((tileId) => {
     transferPropertyOwnership(next, initiator, partner, tileId);
@@ -579,13 +516,71 @@ function handleAcceptTrade(state) {
     transferPropertyOwnership(next, partner, initiator, tileId);
   });
 
-  next.pendingTrade = null;
   const offerDesc = describeTradeSide(next, offer);
   const requestDesc = describeTradeSide(next, request);
-  pushLog(next, `${responder.name} accepts the trade. ${initiator.name} gives ${offerDesc}; ${partner.name} gives ${requestDesc}.`);
+  pushLog(next, `${actor.name} accepts the trade. ${initiator.name} gives ${offerDesc}; ${partner.name} gives ${requestDesc}.`);
 
-  updateDebtAfterAction(next, initiator);
-  updateDebtAfterAction(next, partner);
+  const closed = createEmptyTrade();
+  closed.status = "accepted";
+  closed.lastActionBy = actor.id;
+  next.trade = closed;
+  return next;
+}
+
+function handleDeclineTrade(state, kind = "decline") {
+  const next = cloneState(state);
+  const trade = next.trade;
+  const actor = getCurrentPlayer(next);
+  if (!trade?.active || !actor) return next;
+  const awaitingId = getTradeAwaitingId(trade);
+  if (kind === "decline" && awaitingId !== actor.id) return next;
+  if (kind === "cancel" && trade.initiatorId !== actor.id) return next;
+  const otherId = trade.initiatorId === actor.id ? trade.partnerId : trade.initiatorId;
+  const other = findPlayerById(next, otherId);
+  if (other) {
+    const actionWord = kind === "cancel" ? "cancels" : "declines";
+    pushLog(next, `${actor.name} ${actionWord} the trade with ${other.name}.`);
+  }
+  const closed = createEmptyTrade();
+  closed.status = kind === "cancel" ? "canceled" : "declined";
+  closed.lastActionBy = actor.id;
+  next.trade = closed;
+  return next;
+}
+
+function proposeOrCounterTrade(state, payload, kind) {
+  const next = cloneState(state);
+  const trade = next.trade;
+  const actor = getCurrentPlayer(next);
+  if (!trade?.active || !actor || actor.bankrupt) return next;
+  const partner = findPlayerById(next, trade.partnerId);
+  const initiator = findPlayerById(next, trade.initiatorId);
+  if (!partner || partner.bankrupt || !initiator || initiator.bankrupt) return next;
+
+  const offer = sanitizeTradeSide(payload?.offer);
+  const request = sanitizeTradeSide(payload?.request);
+
+  if (offer.cash < 0 || request.cash < 0) return next;
+
+  if (!ownsProperties(next, trade.initiatorId, offer.properties)) return next;
+  if (!ownsProperties(next, trade.partnerId, request.properties)) return next;
+
+  if (kind === "propose") {
+    if (trade.status !== "idle" || trade.initiatorId !== actor.id) return next;
+  } else {
+    const awaitingId = getTradeAwaitingId(trade);
+    if (awaitingId !== actor.id) return next;
+  }
+
+  trade.offer = offer;
+  trade.request = request;
+  trade.status = kind === "propose" ? "proposed" : "countered";
+  trade.lastActionBy = actor.id;
+  trade.fairness = computeTradeFairness(next, trade);
+
+  const verb = kind === "propose" ? "proposes" : "counters";
+  const target = actor.id === initiator.id ? partner : initiator;
+  pushLog(next, `${actor.name} ${verb} a trade with ${target.name}.`);
   return next;
 }
 
@@ -1433,36 +1428,151 @@ function transferPropertyOwnership(state, fromPlayer, toPlayer, tileId) {
   }
 }
 
-function createTradeId(state) {
-  if (!state.meta) {
-    state.meta = {};
-  }
-  state.meta.tradeCounter = (state.meta.tradeCounter || 0) + 1;
-  return `trade-${state.meta.tradeCounter}`;
+function createEmptyTrade() {
+  return {
+    active: false,
+    initiatorId: null,
+    partnerId: null,
+    offer: { cash: 0, properties: [] },
+    request: { cash: 0, properties: [] },
+    status: "idle",
+    lastActionBy: null,
+    fairness: {
+      initiatorScore: 0,
+      partnerScore: 0,
+      ratio: 1,
+      verdict: "balanced",
+    },
+  };
 }
 
-function normalizeTradeSide(state, ownerId, side) {
-  const result = {
-    cash: 0,
-    properties: [],
-  };
+function sanitizeTradeSide(side) {
+  const result = { cash: 0, properties: [] };
   if (!side) return result;
-  const cashValue = Number(side.cash);
-  if (Number.isFinite(cashValue) && cashValue > 0) {
-    result.cash = Math.max(0, Math.floor(cashValue));
+  const cash = Number(side.cash);
+  if (Number.isFinite(cash) && cash > 0) {
+    result.cash = Math.floor(cash);
   }
-  const props = Array.isArray(side.properties) ? side.properties : [];
-  const unique = new Set();
-  props.forEach((value) => {
-    const tileId = typeof value === "number" ? value : parseInt(value, 10);
-    if (!Number.isInteger(tileId)) return;
-    if (state.tileOwnership?.[tileId] !== ownerId) return;
-    const tile = getMortgageableTile(tileId);
-    if (!tile) return;
-    unique.add(tileId);
-  });
-  result.properties = Array.from(unique.values());
+  if (Array.isArray(side.properties)) {
+    const unique = new Set();
+    side.properties.forEach((value) => {
+      const tileId = typeof value === "number" ? value : parseInt(value, 10);
+      if (Number.isInteger(tileId)) {
+        unique.add(tileId);
+      }
+    });
+    result.properties = Array.from(unique.values());
+  }
   return result;
+}
+
+function ownsProperties(state, playerId, properties) {
+  return properties.every((tileId) => state.tileOwnership?.[tileId] === playerId);
+}
+
+function getTradeAwaitingId(trade) {
+  if (!trade?.active) return null;
+  if (trade.status === "proposed") return trade.partnerId;
+  if (trade.status === "countered") return trade.initiatorId;
+  return null;
+}
+
+function computeTradeFairness(state, draft) {
+  const initiator = findPlayerById(state, draft.initiatorId);
+  const partner = findPlayerById(state, draft.partnerId);
+  if (!initiator || !partner) {
+    return { initiatorScore: 0, partnerScore: 0, ratio: 1, verdict: "balanced" };
+  }
+
+  const initiatorOwned = new Set((initiator.owned || []).map((id) => Number(id)));
+  const partnerOwned = new Set((partner.owned || []).map((id) => Number(id)));
+
+  const offerProps = (draft.offer?.properties || []).map((id) => Number(id));
+  const requestProps = (draft.request?.properties || []).map((id) => Number(id));
+
+  offerProps.forEach((id) => {
+    initiatorOwned.delete(id);
+    partnerOwned.add(id);
+  });
+  requestProps.forEach((id) => {
+    partnerOwned.delete(id);
+    initiatorOwned.add(id);
+  });
+
+  const initiatorPropertyValue = requestProps.reduce(
+    (sum, id) => sum + computePropertyTradeValue(state, id, initiatorOwned),
+    0
+  );
+  const partnerPropertyValue = offerProps.reduce(
+    (sum, id) => sum + computePropertyTradeValue(state, id, partnerOwned),
+    0
+  );
+
+  const initiatorScore = draft.request.cash + initiatorPropertyValue;
+  const partnerScore = draft.offer.cash + partnerPropertyValue;
+
+  let ratio;
+  if (partnerScore <= 0) {
+    ratio = initiatorScore > 0 ? 99 : 1;
+  } else {
+    ratio = initiatorScore / partnerScore;
+  }
+
+  let verdict = "balanced";
+  if (ratio > 1.1) {
+    verdict = "initiator_gains";
+  } else if (ratio < 0.9) {
+    verdict = "partner_gains";
+  }
+
+  return {
+    initiatorScore,
+    partnerScore,
+    ratio,
+    verdict,
+  };
+}
+
+function computePropertyTradeValue(state, tileId, ownershipSet) {
+  const tile = BOARD_TILES.find((t) => t.id === tileId);
+  if (!tile) return 0;
+  if (tile.type === "property") {
+    let value = tile.price || 0;
+    if (tile.group) {
+      const groupTiles = BOARD_TILES.filter((t) => t.type === "property" && t.group === tile.group);
+      const completesGroup = groupTiles.every((groupTile) => ownershipSet.has(groupTile.id));
+      if (completesGroup) {
+        value *= 1.2;
+      }
+    }
+    return value;
+  }
+  if (tile.type === "rail") {
+    const allRails = BOARD_TILES.filter((t) => t.type === "rail");
+    const ownedRails = allRails.filter((rail) => ownershipSet.has(rail.id)).length;
+    const rentArray = tile.rent?.length ? tile.rent : [25, 50, 100, 200];
+    const rent = rentArray[Math.min(rentArray.length - 1, Math.max(0, ownedRails - 1))] || rentArray[0];
+    return rent * 10;
+  }
+  if (tile.type === "utility") {
+    const utilitiesOwned = BOARD_TILES.filter((t) => t.type === "utility" && ownershipSet.has(t.id)).length;
+    const base = utilitiesOwned >= 2 ? 7 * 10 : 7 * 4;
+    return base * 3;
+  }
+  return tile.price || 0;
+}
+
+function validateTradeOwnershipAndCash(state, trade) {
+  if (!trade?.active) return false;
+  if (trade.offer.cash < 0 || trade.request.cash < 0) return false;
+  const initiator = findPlayerById(state, trade.initiatorId);
+  const partner = findPlayerById(state, trade.partnerId);
+  if (!initiator || initiator.bankrupt || !partner || partner.bankrupt) return false;
+  const offerProps = (trade.offer.properties || []).map((id) => Number(id));
+  const requestProps = (trade.request.properties || []).map((id) => Number(id));
+  if (!ownsProperties(state, initiator.id, offerProps)) return false;
+  if (!ownsProperties(state, partner.id, requestProps)) return false;
+  return true;
 }
 
 function describeTradeSide(state, side) {
@@ -1593,7 +1703,7 @@ function finalizeBankruptcy(state, player, creditorId = "bank") {
   }
 
   clearDebtContext(state);
-  state.pendingTrade = null;
+  state.trade = createEmptyTrade();
 
   player.bankrupt = true;
   player.position = -1;

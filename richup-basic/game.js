@@ -37,17 +37,17 @@ const elements = {
   evenBuildToggle: document.getElementById("even-build-toggle"),
   evenBuildStatus: document.getElementById("even-build-status"),
   tradeModal: document.getElementById("trade-modal"),
-  tradePartnerSelect: document.getElementById("trade-partner-select"),
-  tradeOfferProperties: document.getElementById("trade-offer-properties"),
-  tradeRequestProperties: document.getElementById("trade-request-properties"),
+  tradePartner: document.getElementById("trade-partner"),
+  tradeOfferProps: document.getElementById("trade-offer-props"),
+  tradeRequestProps: document.getElementById("trade-request-props"),
   tradeOfferCash: document.getElementById("trade-offer-cash"),
   tradeRequestCash: document.getElementById("trade-request-cash"),
-  tradeStatus: document.getElementById("trade-status"),
-  tradeProposeBtn: document.getElementById("trade-propose-btn"),
-  tradeCounterBtn: document.getElementById("trade-counter-btn"),
-  tradeAcceptBtn: document.getElementById("trade-accept-btn"),
-  tradeDeclineBtn: document.getElementById("trade-decline-btn"),
-  tradeCancelBtn: document.getElementById("trade-cancel-btn"),
+  tradeFairness: document.getElementById("trade-fairness"),
+  tradePropose: document.getElementById("trade-propose"),
+  tradeCounter: document.getElementById("trade-counter"),
+  tradeAccept: document.getElementById("trade-accept"),
+  tradeDecline: document.getElementById("trade-decline"),
+  tradeCancel: document.getElementById("trade-cancel"),
   debtModal: document.getElementById("debt-modal"),
   debtSummary: document.getElementById("debt-summary"),
   debtSellList: document.getElementById("debt-sell-list"),
@@ -110,7 +110,7 @@ function init() {
 async function dispatch(intent) {
   if (!intent || !intent.type) return;
   if (state.debtContext?.active && DEBT_BLOCKED_INTENTS.has(intent.type)) return;
-  if (state.pendingTrade && TRADE_BLOCKED_INTENTS.has(intent.type)) return;
+  if (state.trade?.active && TRADE_BLOCKED_INTENTS.has(intent.type)) return;
   if (isAnimating && intent.type !== "NEW_GAME" && intent.type !== "TOGGLE_EVEN_BUILD") return;
 
   const previous = state;
@@ -246,6 +246,18 @@ function ensureStateShapes() {
   if (!state.mortgages) {
     state.mortgages = {};
   }
+  if (!state.trade || typeof state.trade !== "object") {
+    state.trade = {
+      active: false,
+      initiatorId: null,
+      partnerId: null,
+      offer: { cash: 0, properties: [] },
+      request: { cash: 0, properties: [] },
+      status: "idle",
+      lastActionBy: null,
+      fairness: { initiatorScore: 0, partnerScore: 0, ratio: 1, verdict: "balanced" },
+    };
+  }
   BOARD_TILES.forEach((tile) => {
     if (tile.type === "property") {
       if (typeof state.structures[tile.id] !== "number") {
@@ -261,8 +273,14 @@ function ensureStateShapes() {
   if (!state.debtContext) {
     state.debtContext = { active: false, amountOwed: 0, creditor: null };
   }
-  if (state.pendingTrade) {
-    state.pendingTrade.offer = state.pendingTrade.offer || { cash: 0, properties: [] };
-    state.pendingTrade.request = state.pendingTrade.request || { cash: 0, properties: [] };
+  if (state.trade) {
+    state.trade.offer = state.trade.offer || { cash: 0, properties: [] };
+    state.trade.request = state.trade.request || { cash: 0, properties: [] };
+    state.trade.fairness = state.trade.fairness || {
+      initiatorScore: 0,
+      partnerScore: 0,
+      ratio: 1,
+      verdict: "balanced",
+    };
   }
 }

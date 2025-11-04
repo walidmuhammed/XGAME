@@ -1,5 +1,5 @@
 import { BOARD_TILES } from "./board.js";
-import { selectors, canBuildHere, canSellHere } from "./rules.js";
+import { selectors, canBuildHere, canSellHere, canMortgageHere, canUnmortgageHere } from "./rules.js";
 
 export function createUI({ elements, boardApi, onIntent, getState }) {
   const uiState = {
@@ -48,8 +48,8 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   if (elements.tradeBtn) {
     elements.tradeBtn.addEventListener("click", () => openTradeModal());
   }
-  if (elements.tradePartnerSelect) {
-    elements.tradePartnerSelect.addEventListener("change", (event) => {
+  if (elements.tradePartner) {
+    elements.tradePartner.addEventListener("change", (event) => {
       uiState.tradePartnerId = event.target.value || null;
       if (uiState.tradePartnerId) {
         onIntent({ type: "OPEN_TRADE", payload: { partnerId: uiState.tradePartnerId } });
@@ -57,26 +57,26 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       renderTradeModal(getState());
     });
   }
-  if (elements.tradeProposeBtn) {
-    elements.tradeProposeBtn.addEventListener("click", () => submitTradeProposal("PROPOSE_TRADE"));
+  if (elements.tradePropose) {
+    elements.tradePropose.addEventListener("click", () => submitTradeProposal("PROPOSE_TRADE"));
   }
-  if (elements.tradeCounterBtn) {
-    elements.tradeCounterBtn.addEventListener("click", () => submitTradeProposal("COUNTER_TRADE"));
+  if (elements.tradeCounter) {
+    elements.tradeCounter.addEventListener("click", () => submitTradeProposal("COUNTER_TRADE"));
   }
-  if (elements.tradeAcceptBtn) {
-    elements.tradeAcceptBtn.addEventListener("click", () => {
+  if (elements.tradeAccept) {
+    elements.tradeAccept.addEventListener("click", () => {
       onIntent({ type: "ACCEPT_TRADE" });
       closeTradeModal();
     });
   }
-  if (elements.tradeDeclineBtn) {
-    elements.tradeDeclineBtn.addEventListener("click", () => {
+  if (elements.tradeDecline) {
+    elements.tradeDecline.addEventListener("click", () => {
       onIntent({ type: "DECLINE_TRADE" });
       closeTradeModal();
     });
   }
-  if (elements.tradeCancelBtn) {
-    elements.tradeCancelBtn.addEventListener("click", () => {
+  if (elements.tradeCancel) {
+    elements.tradeCancel.addEventListener("click", () => {
       onIntent({ type: "CANCEL_TRADE" });
       closeTradeModal();
     });
@@ -204,7 +204,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     const player = selectors.getCurrentPlayer(state);
     const hasWinner = selectors.hasWinner(state);
     const debtActive = Boolean(state.debtContext?.active);
-    const tradePending = Boolean(state.pendingTrade);
+    const tradePending = Boolean(selectors.getTrade(state)?.active);
     const canRoll = !hasWinner && player && !player.bankrupt && state.turn.phase === "idle" && !debtActive && !tradePending;
     const canBuy = !hasWinner && selectors.canBuyCurrentTile(state) && !debtActive;
     const canEnd =
@@ -227,9 +227,16 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
 
     if (elements.tradeBtn) {
       const activePlayers = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
-      const canTrade = !hasWinner && player && !player.bankrupt && activePlayers.length > 0;
+      const tradeState = selectors.getTrade(state);
+      const tradeActive = Boolean(tradeState?.active);
+      const canTrade = !hasWinner && player && !player.bankrupt && !tradeActive && activePlayers.length > 0;
       elements.tradeBtn.disabled = !canTrade;
-      elements.tradeBtn.title = canTrade ? "Open trade builder" : "Trading unavailable";
+      const tradeTitle = tradeActive
+        ? "Finish or cancel the current trade first"
+        : canTrade
+        ? "Open trade builder"
+        : "Trading unavailable";
+      elements.tradeBtn.title = tradeTitle;
     }
   }
 
@@ -470,6 +477,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
 
   function closeTradeModal() {
     uiState.tradeModalOpen = false;
+    onIntent({ type: "CLOSE_TRADE" });
     if (elements.tradeModal) {
       elements.tradeModal.classList.add("hidden");
       elements.tradeModal.setAttribute("aria-hidden", "true");
@@ -477,10 +485,10 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   }
 
   function populateTradePartners(state) {
-    if (!elements.tradePartnerSelect) return;
+    if (!elements.tradePartner) return;
     const player = selectors.getCurrentPlayer(state);
     const partners = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
-    elements.tradePartnerSelect.innerHTML = "";
+    elements.tradePartner.innerHTML = "";
     const fragment = document.createDocumentFragment();
     if (!partners.length) {
       const option = document.createElement("option");
@@ -499,8 +507,8 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
         uiState.tradePartnerId = partners[0].id;
       }
     }
-    elements.tradePartnerSelect.appendChild(fragment);
-    elements.tradePartnerSelect.value = uiState.tradePartnerId || "";
+    elements.tradePartner.appendChild(fragment);
+    elements.tradePartner.value = uiState.tradePartnerId || "";
   }
 
   function renderTradeModal(state) {
@@ -511,10 +519,16 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       return;
     }
 
-    const trade = state.pendingTrade;
-    if (trade && !uiState.tradeModalOpen && (trade.awaiting === player.id || trade.from === player.id)) {
-      uiState.tradePartnerId = trade.from === player.id ? trade.to : trade.from;
+    const trade = selectors.getTrade(state);
+    const isParticipant = trade.active && (trade.initiatorId === player.id || trade.partnerId === player.id);
+
+    if (trade.active && isParticipant) {
       uiState.tradeModalOpen = true;
+      uiState.tradePartnerId = player.id === trade.initiatorId ? trade.partnerId : trade.initiatorId;
+    } else if (!trade.active && !uiState.tradeModalOpen) {
+      // no-op
+    } else if (!trade.active && uiState.tradeModalOpen) {
+      uiState.tradeModalOpen = false;
     }
 
     if (!uiState.tradeModalOpen) {
@@ -530,86 +544,99 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
 
     const partnerId = uiState.tradePartnerId;
     const partner = state.players.find((p) => p.id === partnerId) || null;
-
     if (!partner) {
-      if (elements.tradeStatus) {
-        elements.tradeStatus.textContent = "Select a partner to begin.";
-      }
-      if (elements.tradeOfferProperties) elements.tradeOfferProperties.innerHTML = "";
-      if (elements.tradeRequestProperties) elements.tradeRequestProperties.innerHTML = "";
-      if (elements.tradeOfferCash) elements.tradeOfferCash.value = 0;
-      if (elements.tradeRequestCash) elements.tradeRequestCash.value = 0;
+      if (elements.tradeOfferProps) elements.tradeOfferProps.innerHTML = "";
+      if (elements.tradeRequestProps) elements.tradeRequestProps.innerHTML = "";
       return;
     }
 
-    if (trade && trade.to !== partner.id && trade.from === player.id) {
-      // ensure trade matches selected partner; open new negotiation if needed
-      onIntent({ type: "OPEN_TRADE", payload: { partnerId: partner.id } });
-      return;
-    }
+    const viewingInitiator = trade.active && trade.initiatorId === player.id && trade.partnerId === partner.id;
+    const viewingPartner = trade.active && trade.partnerId === player.id && trade.initiatorId === partner.id;
+    const tradeMatches = viewingInitiator || viewingPartner;
 
-    const offer = trade?.offer || { cash: 0, properties: [] };
-    const request = trade?.request || { cash: 0, properties: [] };
+    const youGive = tradeMatches ? (viewingInitiator ? trade.offer : trade.request) : null;
+    const youReceive = tradeMatches ? (viewingInitiator ? trade.request : trade.offer) : null;
 
     if (elements.tradeOfferCash) {
-      elements.tradeOfferCash.value = offer.cash ?? 0;
+      elements.tradeOfferCash.value = youGive ? youGive.cash ?? 0 : 0;
     }
     if (elements.tradeRequestCash) {
-      elements.tradeRequestCash.value = request.cash ?? 0;
+      elements.tradeRequestCash.value = youReceive ? youReceive.cash ?? 0 : 0;
     }
 
-    if (elements.tradeOfferProperties) {
+    if (elements.tradeOfferProps) {
       const playerTiles = tileData.filter(
         (tile) => isMortgageableTile(tile) && state.tileOwnership?.[tile.id] === player.id
       );
-      buildTradePropertyList(elements.tradeOfferProperties, playerTiles, new Set(offer.properties), state);
+      const selected = new Set(youGive ? youGive.properties : []);
+      buildTradePropertyList(elements.tradeOfferProps, playerTiles, selected, state);
     }
 
-    if (elements.tradeRequestProperties) {
+    if (elements.tradeRequestProps) {
       const partnerTiles = tileData.filter(
         (tile) => isMortgageableTile(tile) && state.tileOwnership?.[tile.id] === partner.id
       );
-      buildTradePropertyList(elements.tradeRequestProperties, partnerTiles, new Set(request.properties), state);
+      const selected = new Set(youReceive ? youReceive.properties : []);
+      buildTradePropertyList(elements.tradeRequestProps, partnerTiles, selected, state);
     }
 
-    if (elements.tradeStatus) {
-      if (!trade) {
-        elements.tradeStatus.textContent = "Drafting proposal.";
-      } else if (trade.awaiting === player.id) {
-        elements.tradeStatus.textContent = "Awaiting your response.";
-      } else if (trade.awaiting === partner.id) {
-        elements.tradeStatus.textContent = "Waiting for partner.";
-      } else {
-        elements.tradeStatus.textContent = "Negotiating.";
-      }
-    }
+    renderTradeFairness(state, trade);
 
-    const isInitiator = trade ? trade.from === player.id : true;
-    const awaitingMe = trade ? trade.awaiting === player.id : false;
-    const isPartner = trade ? trade.to === player.id : false;
+    const awaitingId = trade.active
+      ? trade.status === "proposed"
+        ? trade.partnerId
+        : trade.status === "countered"
+        ? trade.initiatorId
+        : null
+      : null;
+    const canAccept = trade.active && (trade.status === "proposed" || trade.status === "countered");
 
-    if (elements.tradeProposeBtn) {
-      elements.tradeProposeBtn.disabled = !isInitiator;
+    if (elements.tradePropose) {
+      elements.tradePropose.disabled = !(partner && trade.active && trade.status === "idle" && trade.initiatorId === player.id);
     }
-    if (elements.tradeCounterBtn) {
-      elements.tradeCounterBtn.disabled = !(trade && isPartner);
+    if (elements.tradeCounter) {
+      elements.tradeCounter.disabled = !(trade.active && awaitingId === player.id);
     }
-    if (elements.tradeAcceptBtn) {
-      elements.tradeAcceptBtn.disabled = !awaitingMe;
+    if (elements.tradeAccept) {
+      elements.tradeAccept.disabled = !(canAccept && awaitingId === player.id);
     }
-    if (elements.tradeDeclineBtn) {
-      elements.tradeDeclineBtn.disabled = !awaitingMe;
+    if (elements.tradeDecline) {
+      elements.tradeDecline.disabled = !(canAccept && awaitingId === player.id);
     }
-    if (elements.tradeCancelBtn) {
-      elements.tradeCancelBtn.disabled = !(trade && isInitiator);
+    if (elements.tradeCancel) {
+      elements.tradeCancel.disabled = !(trade.active && trade.initiatorId === player.id);
     }
+  }
+
+  function renderTradeFairness(state, trade) {
+    if (!elements.tradeFairness) return;
+    if (!trade || !trade.active) {
+      elements.tradeFairness.textContent = "Fairness: —";
+      elements.tradeFairness.className = "fairness";
+      return;
+    }
+    const fairness = trade.fairness || { ratio: 1, verdict: "balanced" };
+    const ratioText = Number.isFinite(fairness.ratio) && fairness.ratio > 0 ? fairness.ratio.toFixed(2) : "—";
+    let verdictText = "Balanced";
+    let extraClass = "";
+    const current = selectors.getCurrentPlayer(state);
+    const currentId = current?.id;
+    if (fairness.verdict === "initiator_gains") {
+      verdictText = trade.initiatorId === currentId ? "You gain" : "They gain";
+      extraClass = " fairness-initiator";
+    } else if (fairness.verdict === "partner_gains") {
+      verdictText = trade.partnerId === currentId ? "You gain" : "They gain";
+      extraClass = " fairness-partner";
+    }
+    elements.tradeFairness.className = `fairness${extraClass}`.trim();
+    elements.tradeFairness.textContent = `Fairness: ${verdictText} (ratio ${ratioText})`;
   }
 
   function buildTradePropertyList(container, tiles, selectedIds, state) {
     container.innerHTML = "";
     if (!tiles.length) {
       const empty = document.createElement("div");
-      empty.className = "trade-empty";
+      empty.className = "prop-empty";
       empty.textContent = "No properties";
       container.appendChild(empty);
       return;
@@ -636,7 +663,7 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       const houses = selectors.getHouseCount(state, tile.id);
       if (houses > 0) {
         const info = document.createElement("span");
-        info.className = "trade-house-info";
+        info.className = "prop-house-info";
         info.textContent = ` (${houses} house${houses === 1 ? "" : "s"})`;
         label.appendChild(info);
       }
@@ -657,18 +684,24 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
         }
       });
     }
-    const cashValue = cashInput ? Math.max(0, Math.floor(Number(cashInput.value) || 0)) : 0;
+    let cashValue = cashInput ? Math.max(0, Math.floor(Number(cashInput.value) || 0)) : 0;
+    if (cashInput) {
+      cashInput.value = cashValue;
+    }
     return { cash: cashValue, properties };
   }
 
   function submitTradeProposal(kind) {
     if (!uiState.tradePartnerId) return;
-    const offer = collectTradeSide(elements.tradeOfferProperties, elements.tradeOfferCash);
-    const request = collectTradeSide(elements.tradeRequestProperties, elements.tradeRequestCash);
-    const payload = { offer, request };
-    if (kind === "PROPOSE_TRADE") {
-      payload.to = uiState.tradePartnerId;
-    }
+    const state = getState();
+    const trade = selectors.getTrade(state);
+    const player = selectors.getCurrentPlayer(state);
+    const isInitiator = trade.active ? trade.initiatorId === player.id : true;
+    const youGive = collectTradeSide(elements.tradeOfferProps, elements.tradeOfferCash);
+    const youReceive = collectTradeSide(elements.tradeRequestProps, elements.tradeRequestCash);
+    const payload = isInitiator
+      ? { offer: youGive, request: youReceive }
+      : { offer: youReceive, request: youGive };
     onIntent({ type: kind, payload });
   }
 

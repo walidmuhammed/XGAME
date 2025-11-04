@@ -32,7 +32,7 @@
             <button id="use-card-btn" class="secondary" disabled>Use Get Out of Jail</button>
             <button id="build-btn" class="secondary hidden" disabled>Build +</button>
             <button id="sell-btn" class="secondary hidden" disabled>Sell −</button>
-            <button id="trade-btn" class="secondary" disabled>Trade</button>
+            <button id="trade-btn" class="secondary">Trade</button>
           </div>
         </div>
         <div class="panel-section">
@@ -78,33 +78,35 @@
   </div>
 
   <div class="modal hidden" id="trade-modal" aria-hidden="true" role="dialog">
-    <div class="modal-content wide">
-      <h2>Trade Builder</h2>
-      <div class="trade-header">
-        <label for="trade-partner-select">Partner</label>
-        <select id="trade-partner-select"></select>
-        <span id="trade-status" class="trade-status"></span>
-      </div>
+    <div class="modal-content trade-modal">
+      <h2>Trade</h2>
+      <label for="trade-partner" class="trade-partner-label">
+        Partner
+        <select id="trade-partner"></select>
+      </label>
       <div class="trade-columns">
-        <div class="trade-column" id="trade-offer-column">
+        <div class="trade-side">
           <h3>You Give</h3>
-          <div class="trade-props" id="trade-offer-properties"></div>
-          <label for="trade-offer-cash" class="trade-cash-label">Cash Offer</label>
-          <input type="number" id="trade-offer-cash" min="0" value="0">
+          <div id="trade-offer-props" class="prop-list"></div>
+          <label>Cash
+            <input id="trade-offer-cash" type="number" min="0" value="0">
+          </label>
         </div>
-        <div class="trade-column" id="trade-request-column">
-          <h3>Partner Gives</h3>
-          <div class="trade-props" id="trade-request-properties"></div>
-          <label for="trade-request-cash" class="trade-cash-label">Cash Request</label>
-          <input type="number" id="trade-request-cash" min="0" value="0">
+        <div class="trade-side">
+          <h3>You Receive</h3>
+          <div id="trade-request-props" class="prop-list"></div>
+          <label>Cash
+            <input id="trade-request-cash" type="number" min="0" value="0">
+          </label>
         </div>
       </div>
-      <div class="trade-actions">
-        <button id="trade-propose-btn" class="primary">Propose</button>
-        <button id="trade-counter-btn" class="secondary">Counter</button>
-        <button id="trade-accept-btn" class="primary">Accept</button>
-        <button id="trade-decline-btn" class="secondary">Decline</button>
-        <button id="trade-cancel-btn" class="secondary">Cancel</button>
+      <div id="trade-fairness" class="fairness">Fairness: —</div>
+      <div class="form-actions trade-actions">
+        <button id="trade-propose" class="primary">Propose</button>
+        <button id="trade-counter">Counter</button>
+        <button id="trade-accept" class="success">Accept</button>
+        <button id="trade-decline" class="danger">Decline</button>
+        <button id="trade-cancel" class="secondary">Cancel</button>
       </div>
     </div>
   </div>
