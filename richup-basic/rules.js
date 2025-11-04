@@ -50,7 +50,9 @@ export function createInitialState(config = {}) {
     },
     log: [],
     config: mergedConfig,
-    trade: createEmptyTrade(),
+    trades: [],
+    activeTradeId: null,
+    tradeDraft: createEmptyTradeDraft(),
     debtContext: {
       active: false,
       amountOwed: 0,
@@ -91,20 +93,28 @@ export function stepTurn(state, intent) {
       return handleMortgageProperty(state, intent.payload || {});
     case "UNMORTGAGE_PROPERTY":
       return handleUnmortgageProperty(state, intent.payload || {});
-    case "OPEN_TRADE":
-      return handleOpenTrade(state, intent.payload || {});
-    case "PROPOSE_TRADE":
-      return handleProposeTrade(state, intent.payload || {});
-    case "COUNTER_TRADE":
-      return handleCounterTrade(state, intent.payload || {});
-    case "ACCEPT_TRADE":
-      return handleAcceptTrade(state);
-    case "DECLINE_TRADE":
-      return handleDeclineTrade(state, "decline");
-    case "CANCEL_TRADE":
-      return handleDeclineTrade(state, "cancel");
-    case "CLOSE_TRADE":
-      return handleCloseTrade(state);
+    case "OPEN_TRADE_PICKER":
+      return handleOpenTradePicker(state);
+    case "OPEN_TRADE_COMPOSER":
+      return handleOpenTradeComposer(state, intent.payload || {});
+    case "CLOSE_TRADE_UI":
+      return handleCloseTradeUI(state);
+    case "TRADE_SET_CASH":
+      return handleTradeSetCash(state, intent.payload || {});
+    case "TRADE_TOGGLE_PROP":
+      return handleTradeToggleProp(state, intent.payload || {});
+    case "TRADE_TOGGLE_CARD":
+      return handleTradeToggleCard(state, intent.payload || {});
+    case "TRADE_SEND":
+      return handleTradeSend(state);
+    case "TRADE_ACCEPT":
+      return handleTradeAccept(state, intent.payload || {});
+    case "TRADE_DECLINE":
+      return handleTradeDecline(state, intent.payload || {});
+    case "TRADE_COUNTER":
+      return handleTradeCounter(state, intent.payload || {});
+    case "TRADE_CANCEL":
+      return handleTradeCancel(state, intent.payload || {});
     case "UPDATE_APPEARANCE":
       return handleUpdateAppearance(state, intent.payload || {});
     case "BEGIN_DEBT_RESOLUTION":
@@ -130,7 +140,10 @@ export const selectors = {
   getHouseCount: (state, tileId) => state.structures?.[tileId] ?? 0,
   getConfig: (state) => state.config,
   getMortgages: (state) => state.mortgages,
-  getTrade: (state) => state.trade || createEmptyTrade(),
+  getTrades: (state) => state.trades || [],
+  getTradeById: (state, id) => (state.trades || []).find((thread) => thread.id === id) || null,
+  getTradeDraft: (state) => state.tradeDraft || createEmptyTradeDraft(),
+  getActiveTradeId: (state) => state.activeTradeId || null,
   getPlayerById: (state, id) => state.players.find((p) => p.id === id) || null,
   getOwnedProperties: (state, playerId) =>
     Object.keys(state.tileOwnership || {})
@@ -168,7 +181,9 @@ function startNewGame(prevState, payload) {
   base.structures = createEmptyStructures();
   base.mortgages = createEmptyMortgages();
   base.turn = createInitialTurn();
-  base.trade = createEmptyTrade();
+  base.trades = [];
+  base.activeTradeId = null;
+  base.tradeDraft = createEmptyTradeDraft();
 
   if (payload.seed) {
     base.meta.seed = String(payload.seed);
@@ -484,143 +499,545 @@ function handleUpdateAppearance(state, payload) {
   return next;
 }
 
-function handleOpenTrade(state, payload) {
+function handleOpenTradePicker(state) {
   const next = cloneState(state);
   const player = getCurrentPlayer(next);
   if (!player || player.bankrupt) return next;
-  if (next.trade?.active) return next;
-  const partnerId = payload?.partnerId;
+  const draft = createEmptyTradeDraft();
+  draft.from.playerId = player.id;
+  next.tradeDraft = draft;
+  next.activeTradeId = null;
+  return next;
+}
+
+function handleOpenTradeComposer(state, payload) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+
+  const tradeId = payload?.tradeId ? String(payload.tradeId) : null;
+  if (tradeId) {
+    return prepareDraftForThread(next, tradeId, player.id);
+  }
+
+  const partnerId = payload?.partnerId ? String(payload.partnerId) : null;
   const partner = findPlayerById(next, partnerId);
   if (!partner || partner.bankrupt || partner.id === player.id) return next;
-  next.trade = createEmptyTrade();
-  next.trade.active = true;
-  next.trade.initiatorId = player.id;
-  next.trade.partnerId = partner.id;
-  next.trade.status = "idle";
-  pushLog(next, `${player.name} opened a trade with ${partner.name}.`);
+
+  const draft = createDraftForPlayers(player.id, partner.id);
+  draft.active = true;
+  sanitizeDraftForPlayers(next, draft);
+  next.tradeDraft = draft;
+  next.activeTradeId = null;
   return next;
 }
 
-function handleCloseTrade(state) {
-  return cloneState(state);
-}
-
-function handleProposeTrade(state, payload) {
-  return proposeOrCounterTrade(state, payload, "propose");
-}
-
-function handleCounterTrade(state, payload) {
-  return proposeOrCounterTrade(state, payload, "counter");
-}
-
-function handleAcceptTrade(state) {
+function handleCloseTradeUI(state) {
   const next = cloneState(state);
-  const trade = next.trade;
-  const actor = getCurrentPlayer(next);
-  if (!trade?.active || !actor || actor.bankrupt) return next;
-
-  const initiator = findPlayerById(next, trade.initiatorId);
-  const partner = findPlayerById(next, trade.partnerId);
-  if (!initiator || !partner || initiator.bankrupt || partner.bankrupt) {
-    next.trade = createEmptyTrade();
-    return next;
-  }
-
-  const awaitingId = getTradeAwaitingId(trade);
-  if (awaitingId !== actor.id) return next;
-
-  if (!validateTradeOwnershipAndCash(next, trade)) {
-    pushLog(next, "Trade canceled: terms are no longer valid.");
-    next.trade = createEmptyTrade();
-    return next;
-  }
-
-  const offer = trade.offer;
-  const request = trade.request;
-
-  const initiatorCashAfter = initiator.cash - offer.cash + request.cash;
-  const partnerCashAfter = partner.cash - request.cash + offer.cash;
-  if (initiatorCashAfter < 0 || partnerCashAfter < 0) {
-    pushLog(next, "Trade rejected: insufficient cash after exchange.");
-    return next;
-  }
-
-  initiator.cash = initiatorCashAfter;
-  partner.cash = partnerCashAfter;
-
-  offer.properties.forEach((tileId) => {
-    transferPropertyOwnership(next, initiator, partner, tileId);
-  });
-  request.properties.forEach((tileId) => {
-    transferPropertyOwnership(next, partner, initiator, tileId);
-  });
-
-  const offerDesc = describeTradeSide(next, offer);
-  const requestDesc = describeTradeSide(next, request);
-  pushLog(next, `${actor.name} accepts the trade. ${initiator.name} gives ${offerDesc}; ${partner.name} gives ${requestDesc}.`);
-
-  const closed = createEmptyTrade();
-  closed.status = "accepted";
-  closed.lastActionBy = actor.id;
-  next.trade = closed;
+  next.tradeDraft = createEmptyTradeDraft();
+  next.activeTradeId = null;
   return next;
 }
 
-function handleDeclineTrade(state, kind = "decline") {
+function handleTradeSetCash(state, payload) {
+  const side = payload?.side;
+  if (side !== "from" && side !== "to") return cloneState(state);
+  const rawValue = Number(payload?.value);
+  if (!Number.isFinite(rawValue)) return cloneState(state);
   const next = cloneState(state);
-  const trade = next.trade;
-  const actor = getCurrentPlayer(next);
-  if (!trade?.active || !actor) return next;
-  const awaitingId = getTradeAwaitingId(trade);
-  if (kind === "decline" && awaitingId !== actor.id) return next;
-  if (kind === "cancel" && trade.initiatorId !== actor.id) return next;
-  const otherId = trade.initiatorId === actor.id ? trade.partnerId : trade.initiatorId;
-  const other = findPlayerById(next, otherId);
-  if (other) {
-    const actionWord = kind === "cancel" ? "cancels" : "declines";
-    pushLog(next, `${actor.name} ${actionWord} the trade with ${other.name}.`);
-  }
-  const closed = createEmptyTrade();
-  closed.status = kind === "cancel" ? "canceled" : "declined";
-  closed.lastActionBy = actor.id;
-  next.trade = closed;
+  const draft = next.tradeDraft || createEmptyTradeDraft();
+  if (!draft.active) return next;
+  const target = draft[side];
+  const player = findPlayerById(next, target.playerId);
+  if (!player || player.bankrupt) return next;
+  const value = Math.max(0, Math.min(Math.floor(rawValue), player.cash));
+  target.cash = value;
+  draft.validationError = null;
+  next.tradeDraft = draft;
   return next;
 }
 
-function proposeOrCounterTrade(state, payload, kind) {
+function handleTradeToggleProp(state, payload) {
+  const side = payload?.side;
+  if (side !== "from" && side !== "to") return cloneState(state);
+  const tileId = Number(payload?.tileId);
+  if (!Number.isInteger(tileId)) return cloneState(state);
   const next = cloneState(state);
-  const trade = next.trade;
-  const actor = getCurrentPlayer(next);
-  if (!trade?.active || !actor || actor.bankrupt) return next;
-  const partner = findPlayerById(next, trade.partnerId);
-  const initiator = findPlayerById(next, trade.initiatorId);
-  if (!partner || partner.bankrupt || !initiator || initiator.bankrupt) return next;
+  const draft = next.tradeDraft || createEmptyTradeDraft();
+  if (!draft.active) return next;
+  const target = draft[side];
+  const ownerId = state.tileOwnership?.[tileId];
+  if (ownerId !== target.playerId) return next;
+  const tile = BOARD_TILES.find((t) => t.id === tileId);
+  if (!tile || (tile.type !== "property" && tile.type !== "rail" && tile.type !== "utility")) return next;
 
-  const offer = sanitizeTradeSide(payload?.offer);
-  const request = sanitizeTradeSide(payload?.request);
-
-  if (offer.cash < 0 || request.cash < 0) return next;
-
-  if (!ownsProperties(next, trade.initiatorId, offer.properties)) return next;
-  if (!ownsProperties(next, trade.partnerId, request.properties)) return next;
-
-  if (kind === "propose") {
-    if (trade.status !== "idle" || trade.initiatorId !== actor.id) return next;
+  const set = new Set(target.properties);
+  if (set.has(tileId)) {
+    set.delete(tileId);
   } else {
-    const awaitingId = getTradeAwaitingId(trade);
-    if (awaitingId !== actor.id) return next;
+    set.add(tileId);
+  }
+  target.properties = Array.from(set.values());
+  draft.validationError = null;
+  next.tradeDraft = draft;
+  return next;
+}
+
+function handleTradeToggleCard(state, payload) {
+  const side = payload?.side;
+  if (side !== "from" && side !== "to") return cloneState(state);
+  const card = payload?.card;
+  if (card !== "leaveJail") return cloneState(state);
+  const next = cloneState(state);
+  const draft = next.tradeDraft || createEmptyTradeDraft();
+  if (!draft.active) return next;
+  const target = draft[side];
+  const player = findPlayerById(next, target.playerId);
+  if (!player || player.bankrupt) return next;
+
+  const maxCards = countLeaveJailCards(player);
+  const hasCard = target.cards.includes("leaveJail");
+  if (hasCard) {
+    target.cards = [];
+  } else if (maxCards > 0) {
+    target.cards = ["leaveJail"];
+  }
+  draft.validationError = null;
+  next.tradeDraft = draft;
+  return next;
+}
+
+function handleTradeSend(state) {
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const draft = next.tradeDraft;
+  if (!draft?.active) return next;
+  if (draft.from.playerId !== player.id) {
+    return next;
   }
 
-  trade.offer = offer;
-  trade.request = request;
-  trade.status = kind === "propose" ? "proposed" : "countered";
-  trade.lastActionBy = actor.id;
-  trade.fairness = computeTradeFairness(next, trade);
+  const partnerId = draft.to?.playerId ? String(draft.to.playerId) : null;
+  const partner = findPlayerById(next, partnerId);
+  if (!partner || partner.bankrupt || partner.id === player.id) {
+    return next;
+  }
 
-  const verb = kind === "propose" ? "proposes" : "counters";
-  const target = actor.id === initiator.id ? partner : initiator;
-  pushLog(next, `${actor.name} ${verb} a trade with ${target.name}.`);
+  draft.validationError = null;
+
+  const validation = validateDraft(next, draft);
+  if (!validation.valid) {
+    next.tradeDraft.validationError = validation.reason || "invalid";
+    return next;
+  }
+
+  const snapshot = createSnapshotFromDraft(draft);
+  const timestamp = Date.now();
+  const isCounter = Boolean(draft.threadId);
+
+  if (!isCounter) {
+    const threadId = shortId();
+    const thread = {
+      id: threadId,
+      initiatorId: draft.from.playerId,
+      partnerId: draft.to.playerId,
+      status: "pending",
+      round: 1,
+      current: cloneSnapshot(snapshot),
+      log: [
+        {
+          by: player.id,
+          type: "proposed",
+          at: timestamp,
+          snapshot: cloneSnapshot(snapshot),
+        },
+      ],
+    };
+    next.trades = [thread, ...(next.trades || [])];
+    next.activeTradeId = threadId;
+    pushLog(next, `${player.name} creates a trade with ${getPlayerName(next, draft.to.playerId)}.`);
+  } else {
+    const thread = findTradeThread(next, draft.threadId);
+    if (!thread || thread.status === "accepted" || thread.status === "declined" || thread.status === "cancelled") {
+      return next;
+    }
+    if (thread.current?.to?.playerId && thread.current.to.playerId !== player.id) {
+      return next;
+    }
+    thread.current = cloneSnapshot(snapshot);
+    thread.status = "countered";
+    thread.round = (thread.round || 0) + 1;
+    thread.log = thread.log || [];
+    thread.log.push({
+      by: player.id,
+      type: "countered",
+      at: timestamp,
+      snapshot: cloneSnapshot(snapshot),
+    });
+    next.activeTradeId = thread.id;
+    pushLog(next, `${player.name} counters a trade with ${getPlayerName(next, draft.to.playerId)}.`);
+  }
+
+  next.tradeDraft = createEmptyTradeDraft();
   return next;
+}
+
+function handleTradeAccept(state, payload) {
+  const tradeId = payload?.tradeId ? String(payload.tradeId) : null;
+  if (!tradeId) return cloneState(state);
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  const thread = findTradeThread(next, tradeId);
+  if (!thread || (thread.status !== "pending" && thread.status !== "countered")) return next;
+
+  if (thread.current.to.playerId !== player.id) return next;
+
+  const validation = validateSnapshot(next, thread.current);
+  if (!validation.valid) {
+    return next;
+  }
+
+  if (!canPlayersAffordSnapshot(next, thread.current)) {
+    return next;
+  }
+
+  applyTradeSnapshot(next, thread.current);
+  thread.status = "accepted";
+  const timestamp = Date.now();
+  thread.log = thread.log || [];
+  thread.log.push({
+    by: player.id,
+    type: "accepted",
+    at: timestamp,
+    snapshot: cloneSnapshot(thread.current),
+  });
+  next.activeTradeId = null;
+  next.tradeDraft = createEmptyTradeDraft();
+
+  const otherName = getPlayerName(next, thread.current.from.playerId);
+  pushLog(next, `${player.name} accepts the trade with ${otherName}.`);
+  return next;
+}
+
+function handleTradeDecline(state, payload) {
+  const tradeId = payload?.tradeId ? String(payload.tradeId) : null;
+  if (!tradeId) return cloneState(state);
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player) return next;
+  const thread = findTradeThread(next, tradeId);
+  if (!thread || (thread.status !== "pending" && thread.status !== "countered")) return next;
+
+  if (thread.current.to.playerId !== player.id) return next;
+
+  thread.status = "declined";
+  const timestamp = Date.now();
+  thread.log = thread.log || [];
+  thread.log.push({
+    by: player.id,
+    type: "declined",
+    at: timestamp,
+    snapshot: cloneSnapshot(thread.current),
+  });
+  next.activeTradeId = null;
+  next.tradeDraft = createEmptyTradeDraft();
+  pushLog(next, `${player.name} declines the trade with ${getPlayerName(next, thread.current.from.playerId)}.`);
+  return next;
+}
+
+function handleTradeCounter(state, payload) {
+  const tradeId = payload?.tradeId ? String(payload.tradeId) : null;
+  if (!tradeId) return cloneState(state);
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player || player.bankrupt) return next;
+  return prepareDraftForThread(next, tradeId, player.id);
+}
+
+function handleTradeCancel(state, payload) {
+  const tradeId = payload?.tradeId ? String(payload.tradeId) : null;
+  if (!tradeId) return cloneState(state);
+  const next = cloneState(state);
+  const player = getCurrentPlayer(next);
+  if (!player) return next;
+  const thread = findTradeThread(next, tradeId);
+  if (!thread || (thread.status !== "pending" && thread.status !== "countered")) return next;
+  if (thread.initiatorId !== player.id) return next;
+
+  thread.status = "cancelled";
+  const timestamp = Date.now();
+  thread.log = thread.log || [];
+  thread.log.push({
+    by: player.id,
+    type: "cancelled",
+    at: timestamp,
+    snapshot: cloneSnapshot(thread.current),
+  });
+  next.activeTradeId = null;
+  next.tradeDraft = createEmptyTradeDraft();
+  pushLog(next, `${player.name} cancels the trade with ${getPlayerName(next, thread.partnerId)}.`);
+  return next;
+}
+
+function prepareDraftForThread(state, tradeId, viewerId) {
+  const thread = findTradeThread(state, tradeId);
+  if (
+    !thread ||
+    thread.status === "accepted" ||
+    thread.status === "declined" ||
+    thread.status === "cancelled"
+  ) {
+    return state;
+  }
+  if (viewerId !== thread.initiatorId && viewerId !== thread.partnerId) {
+    return state;
+  }
+  const otherId = viewerId === thread.initiatorId ? thread.partnerId : thread.initiatorId;
+  const snapshot = cloneSnapshot(thread.current);
+  const fromSide =
+    snapshot.from.playerId === viewerId
+      ? cloneTradeSide(snapshot.from)
+      : cloneTradeSide(snapshot.to);
+  const toSide =
+    snapshot.from.playerId === viewerId
+      ? cloneTradeSide(snapshot.to)
+      : cloneTradeSide(snapshot.from);
+
+  const draft = createEmptyTradeDraft();
+  draft.active = true;
+  draft.threadId = thread.id;
+  draft.partnerId = otherId;
+  draft.from = normalizeTradeSide(fromSide, viewerId);
+  draft.to = normalizeTradeSide(toSide, otherId);
+  sanitizeDraftForPlayers(state, draft);
+  state.tradeDraft = draft;
+  state.activeTradeId = thread.id;
+  return state;
+}
+
+function validateDraft(state, draft) {
+  if (!draft || !draft.active) {
+    return { valid: false, reason: "inactive" };
+  }
+  const fromPlayer = findPlayerById(state, draft.from.playerId);
+  const toPlayer = findPlayerById(state, draft.to.playerId);
+  if (!fromPlayer || !toPlayer || fromPlayer.bankrupt || toPlayer.bankrupt) {
+    return { valid: false, reason: "invalid_players" };
+  }
+  const fromValid = validateSide(state, draft.from);
+  const toValid = validateSide(state, draft.to);
+  if (!fromValid.valid) return fromValid;
+  if (!toValid.valid) return toValid;
+  return { valid: true };
+}
+
+function validateSnapshot(state, snapshot) {
+  if (!snapshot) return { valid: false, reason: "missing" };
+  const fromValid = validateSide(state, snapshot.from);
+  const toValid = validateSide(state, snapshot.to);
+  if (!fromValid.valid) return fromValid;
+  if (!toValid.valid) return toValid;
+  return { valid: true };
+}
+
+function validateSide(state, side) {
+  const player = findPlayerById(state, side.playerId);
+  if (!player || player.bankrupt) {
+    return { valid: false, reason: "player" };
+  }
+  if (!Array.isArray(side.properties) || !Array.isArray(side.cards)) {
+    return { valid: false, reason: "shape" };
+  }
+
+  const propSet = new Set();
+  for (const value of side.properties) {
+    const tileId = Number(value);
+    if (!Number.isInteger(tileId)) {
+      return { valid: false, reason: "prop" };
+    }
+    if (propSet.has(tileId)) {
+      return { valid: false, reason: "duplicate_prop" };
+    }
+    propSet.add(tileId);
+    if (state.tileOwnership?.[tileId] !== side.playerId) {
+      return { valid: false, reason: "ownership" };
+    }
+  }
+
+  if (side.cards.length > 1) {
+    return { valid: false, reason: "cards" };
+  }
+  if (side.cards.includes("leaveJail") && countLeaveJailCards(player) < 1) {
+    return { valid: false, reason: "card_missing" };
+  }
+  if (side.cash < 0 || !Number.isFinite(side.cash)) {
+    return { valid: false, reason: "cash" };
+  }
+  if (side.cash > player.cash) {
+    return { valid: false, reason: "cash_exceeds" };
+  }
+  return { valid: true };
+}
+
+function createSnapshotFromDraft(draft) {
+  return {
+    from: cloneTradeSide(draft.from),
+    to: cloneTradeSide(draft.to),
+  };
+}
+
+function cloneSnapshot(snapshot) {
+  return {
+    from: cloneTradeSide(snapshot.from),
+    to: cloneTradeSide(snapshot.to),
+  };
+}
+
+function cloneTradeSide(side) {
+  return {
+    playerId: side.playerId,
+    cash: Number(side.cash) || 0,
+    properties: Array.from(side.properties || [], (value) => Number(value)),
+    cards: Array.from(side.cards || []),
+  };
+}
+
+function normalizeTradeSide(side, playerId) {
+  const normalized = cloneTradeSide(side);
+  normalized.playerId = playerId;
+  const set = new Set();
+  normalized.properties = normalized.properties.filter((value) => {
+    if (!Number.isInteger(value)) return false;
+    if (set.has(value)) return false;
+    set.add(value);
+    return true;
+  });
+  normalized.cards = normalized.cards.includes("leaveJail") ? ["leaveJail"] : [];
+  normalized.cash = Math.max(0, Math.floor(Number(normalized.cash) || 0));
+  return normalized;
+}
+
+function sanitizeDraftForPlayers(state, draft) {
+  if (!draft) return;
+  sanitizeDraftSide(state, draft.from);
+  sanitizeDraftSide(state, draft.to);
+  draft.validationError = null;
+}
+
+function sanitizeDraftSide(state, side) {
+  if (!side) return;
+  const player = findPlayerById(state, side.playerId);
+  if (!player || player.bankrupt) {
+    side.cash = 0;
+    side.properties = [];
+    side.cards = [];
+    return;
+  }
+
+  const owned = state.tileOwnership || {};
+  side.properties = side.properties.filter((tileId) => owned[tileId] === side.playerId);
+
+  const maxCash = Math.max(0, Math.floor(player.cash));
+  side.cash = Math.min(Math.max(0, Number(side.cash) || 0), maxCash);
+
+  side.cards = Array.isArray(side.cards) ? side.cards : [];
+  if (side.cards.includes("leaveJail")) {
+    side.cards = countLeaveJailCards(player) > 0 ? ["leaveJail"] : [];
+  } else {
+    side.cards = [];
+  }
+}
+
+function findTradeThread(state, tradeId) {
+  if (!tradeId || !Array.isArray(state.trades)) return null;
+  return state.trades.find((thread) => String(thread.id) === tradeId) || null;
+}
+
+function getPlayerName(state, playerId) {
+  const player = findPlayerById(state, playerId);
+  return player ? player.name : "Unknown";
+}
+
+function countLeaveJailCards(player) {
+  if (!player?.heldCards) return 0;
+  return player.heldCards.filter((card) => card.kind === "leaveJail").length;
+}
+
+function canPlayersAffordSnapshot(state, snapshot) {
+  const fromPlayer = findPlayerById(state, snapshot.from.playerId);
+  const toPlayer = findPlayerById(state, snapshot.to.playerId);
+  if (!fromPlayer || !toPlayer) return false;
+  const fromAfter = fromPlayer.cash - snapshot.from.cash + snapshot.to.cash;
+  const toAfter = toPlayer.cash - snapshot.to.cash + snapshot.from.cash;
+  return fromAfter >= 0 && toAfter >= 0;
+}
+
+function applyTradeSnapshot(state, snapshot) {
+  const fromPlayer = findPlayerById(state, snapshot.from.playerId);
+  const toPlayer = findPlayerById(state, snapshot.to.playerId);
+  if (!fromPlayer || !toPlayer) return;
+
+  executeTransfer(state, fromPlayer, toPlayer, snapshot.from);
+  executeTransfer(state, toPlayer, fromPlayer, snapshot.to);
+}
+
+function executeTransfer(state, giver, receiver, side) {
+  giver.cash -= side.cash;
+  receiver.cash += side.cash;
+
+  side.properties.forEach((tileId) => {
+    transferPropertyOwnership(state, giver, receiver, tileId);
+  });
+
+  if (side.cards.includes("leaveJail")) {
+    const index = (giver.heldCards || []).findIndex((card) => card.kind === "leaveJail");
+    if (index >= 0) {
+      const [card] = giver.heldCards.splice(index, 1);
+      receiver.heldCards = receiver.heldCards || [];
+      receiver.heldCards.push(card);
+    }
+  }
+}
+
+function cancelTradesForPlayer(state, playerId) {
+  if (!Array.isArray(state.trades)) return;
+  const timestamp = Date.now();
+  state.trades.forEach((thread) => {
+    if (thread.status === "accepted" || thread.status === "declined" || thread.status === "cancelled") return;
+    if (thread.initiatorId !== playerId && thread.partnerId !== playerId) return;
+    thread.status = "cancelled";
+    thread.log = thread.log || [];
+    thread.log.push({
+      by: playerId,
+      type: "cancelled",
+      at: timestamp,
+      snapshot: cloneSnapshot(thread.current),
+    });
+  });
+}
+
+function createEmptyTradeDraft() {
+  return {
+    active: false,
+    threadId: null,
+    partnerId: null,
+    validationError: null,
+    from: { playerId: null, cash: 0, properties: [], cards: [] },
+    to: { playerId: null, cash: 0, properties: [], cards: [] },
+  };
+}
+
+function createDraftForPlayers(fromPlayerId, toPlayerId) {
+  const draft = createEmptyTradeDraft();
+  draft.from.playerId = fromPlayerId;
+  draft.to.playerId = toPlayerId;
+  draft.partnerId = toPlayerId;
+  return draft;
+}
+
+function shortId() {
+  return Math.random().toString(36).slice(2, 8);
 }
 
 function handleBeginDebtResolution(state, payload) {
@@ -1475,172 +1892,6 @@ function transferPropertyOwnership(state, fromPlayer, toPlayer, tileId) {
   }
 }
 
-function createEmptyTrade() {
-  return {
-    active: false,
-    initiatorId: null,
-    partnerId: null,
-    offer: { cash: 0, properties: [] },
-    request: { cash: 0, properties: [] },
-    status: "idle",
-    lastActionBy: null,
-    fairness: {
-      initiatorScore: 0,
-      partnerScore: 0,
-      ratio: 1,
-      verdict: "balanced",
-    },
-  };
-}
-
-function sanitizeTradeSide(side) {
-  const result = { cash: 0, properties: [] };
-  if (!side) return result;
-  const cash = Number(side.cash);
-  if (Number.isFinite(cash) && cash > 0) {
-    result.cash = Math.floor(cash);
-  }
-  if (Array.isArray(side.properties)) {
-    const unique = new Set();
-    side.properties.forEach((value) => {
-      const tileId = typeof value === "number" ? value : parseInt(value, 10);
-      if (Number.isInteger(tileId)) {
-        unique.add(tileId);
-      }
-    });
-    result.properties = Array.from(unique.values());
-  }
-  return result;
-}
-
-function ownsProperties(state, playerId, properties) {
-  return properties.every((tileId) => state.tileOwnership?.[tileId] === playerId);
-}
-
-function getTradeAwaitingId(trade) {
-  if (!trade?.active) return null;
-  if (trade.status === "proposed") return trade.partnerId;
-  if (trade.status === "countered") return trade.initiatorId;
-  return null;
-}
-
-function computeTradeFairness(state, draft) {
-  const initiator = findPlayerById(state, draft.initiatorId);
-  const partner = findPlayerById(state, draft.partnerId);
-  if (!initiator || !partner) {
-    return { initiatorScore: 0, partnerScore: 0, ratio: 1, verdict: "balanced" };
-  }
-
-  const initiatorOwned = new Set((initiator.owned || []).map((id) => Number(id)));
-  const partnerOwned = new Set((partner.owned || []).map((id) => Number(id)));
-
-  const offerProps = (draft.offer?.properties || []).map((id) => Number(id));
-  const requestProps = (draft.request?.properties || []).map((id) => Number(id));
-
-  offerProps.forEach((id) => {
-    initiatorOwned.delete(id);
-    partnerOwned.add(id);
-  });
-  requestProps.forEach((id) => {
-    partnerOwned.delete(id);
-    initiatorOwned.add(id);
-  });
-
-  const initiatorPropertyValue = requestProps.reduce(
-    (sum, id) => sum + computePropertyTradeValue(state, id, initiatorOwned),
-    0
-  );
-  const partnerPropertyValue = offerProps.reduce(
-    (sum, id) => sum + computePropertyTradeValue(state, id, partnerOwned),
-    0
-  );
-
-  const initiatorScore = draft.request.cash + initiatorPropertyValue;
-  const partnerScore = draft.offer.cash + partnerPropertyValue;
-
-  let ratio;
-  if (partnerScore <= 0) {
-    ratio = initiatorScore > 0 ? 99 : 1;
-  } else {
-    ratio = initiatorScore / partnerScore;
-  }
-
-  let verdict = "balanced";
-  if (ratio > 1.1) {
-    verdict = "initiator_gains";
-  } else if (ratio < 0.9) {
-    verdict = "partner_gains";
-  }
-
-  return {
-    initiatorScore,
-    partnerScore,
-    ratio,
-    verdict,
-  };
-}
-
-function computePropertyTradeValue(state, tileId, ownershipSet) {
-  const tile = BOARD_TILES.find((t) => t.id === tileId);
-  if (!tile) return 0;
-  if (tile.type === "property") {
-    let value = tile.price || 0;
-    if (tile.group) {
-      const groupTiles = BOARD_TILES.filter((t) => t.type === "property" && t.group === tile.group);
-      const completesGroup = groupTiles.every((groupTile) => ownershipSet.has(groupTile.id));
-      if (completesGroup) {
-        value *= 1.2;
-      }
-    }
-    return value;
-  }
-  if (tile.type === "rail") {
-    const allRails = BOARD_TILES.filter((t) => t.type === "rail");
-    const ownedRails = allRails.filter((rail) => ownershipSet.has(rail.id)).length;
-    const rentArray = tile.rent?.length ? tile.rent : [25, 50, 100, 200];
-    const rent = rentArray[Math.min(rentArray.length - 1, Math.max(0, ownedRails - 1))] || rentArray[0];
-    return rent * 10;
-  }
-  if (tile.type === "utility") {
-    const utilitiesOwned = BOARD_TILES.filter((t) => t.type === "utility" && ownershipSet.has(t.id)).length;
-    const base = utilitiesOwned >= 2 ? 7 * 10 : 7 * 4;
-    return base * 3;
-  }
-  return tile.price || 0;
-}
-
-function validateTradeOwnershipAndCash(state, trade) {
-  if (!trade?.active) return false;
-  if (trade.offer.cash < 0 || trade.request.cash < 0) return false;
-  const initiator = findPlayerById(state, trade.initiatorId);
-  const partner = findPlayerById(state, trade.partnerId);
-  if (!initiator || initiator.bankrupt || !partner || partner.bankrupt) return false;
-  const offerProps = (trade.offer.properties || []).map((id) => Number(id));
-  const requestProps = (trade.request.properties || []).map((id) => Number(id));
-  if (!ownsProperties(state, initiator.id, offerProps)) return false;
-  if (!ownsProperties(state, partner.id, requestProps)) return false;
-  return true;
-}
-
-function describeTradeSide(state, side) {
-  const parts = [];
-  if (side.cash > 0) {
-    parts.push(`$${side.cash}`);
-  }
-  if (side.properties.length) {
-    const names = side.properties.map((tileId) => getTileName(tileId));
-    parts.push(names.join(", "));
-  }
-  if (!parts.length) {
-    return "nothing";
-  }
-  return parts.join(" + ");
-}
-
-function getTileName(tileId) {
-  const tile = BOARD_TILES.find((t) => t.id === tileId);
-  return tile ? tile.name : `Tile ${tileId}`;
-}
 
 function attemptAutoSellHouse(state, player) {
   ensureStructures(state);
@@ -1750,7 +2001,9 @@ function finalizeBankruptcy(state, player, creditorId = "bank") {
   }
 
   clearDebtContext(state);
-  state.trade = createEmptyTrade();
+  cancelTradesForPlayer(state, player.id);
+  state.tradeDraft = createEmptyTradeDraft();
+  state.activeTradeId = null;
 
   player.bankrupt = true;
   player.position = -1;

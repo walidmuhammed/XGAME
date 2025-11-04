@@ -5,8 +5,6 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   const uiState = {
     selectedTileId: null,
     lastCardId: null,
-    tradeModalOpen: false,
-    tradePartnerId: null,
     debtModalOpen: false,
     diceOverlayKey: null,
     diceTimeout: null,
@@ -14,6 +12,15 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     chatMessages: [],
     lastChatLogId: 0,
     toastTimeout: null,
+    tradePickerOpen: false,
+    tradeComposerOpen: false,
+    tradeInboundOpen: false,
+    inboundThreadId: null,
+    composerMode: "create",
+    composerThreadId: null,
+    lastInboundThreadId: null,
+    inboundCanCancel: false,
+    tradeComposerJustOpened: false,
   };
 
   const tileData = BOARD_TILES;
@@ -52,41 +59,108 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     });
   }
   if (elements.tradeBtn) {
-    elements.tradeBtn.addEventListener("click", () => openTradeModal());
+    elements.tradeBtn.addEventListener("click", () => {
+      openTradePicker();
+      onIntent({ type: "OPEN_TRADE_PICKER" });
+    });
   }
-  if (elements.tradePartner) {
-    elements.tradePartner.addEventListener("change", (event) => {
-      uiState.tradePartnerId = event.target.value || null;
-      if (uiState.tradePartnerId) {
-        onIntent({ type: "OPEN_TRADE", payload: { partnerId: uiState.tradePartnerId } });
+  if (elements.tradeCreate) {
+    elements.tradeCreate.addEventListener("click", () => {
+      openTradePicker();
+      onIntent({ type: "OPEN_TRADE_PICKER" });
+    });
+  }
+  if (elements.tradeThreads) {
+    elements.tradeThreads.addEventListener("click", handleTradeThreadClick);
+  }
+  if (elements.tradePickList) {
+    elements.tradePickList.addEventListener("click", handleTradePickClick);
+  }
+  if (elements.tradePickModal) {
+    elements.tradePickModal.addEventListener("click", (event) => {
+      if (event.target.dataset.tradeClose !== undefined || event.target === elements.tradePickModal) {
+        closeTradePicker();
+        onIntent({ type: "CLOSE_TRADE_UI" });
       }
-      renderTradeModal(getState());
     });
   }
-  if (elements.tradePropose) {
-    elements.tradePropose.addEventListener("click", () => submitTradeProposal("PROPOSE_TRADE"));
-  }
-  if (elements.tradeCounter) {
-    elements.tradeCounter.addEventListener("click", () => submitTradeProposal("COUNTER_TRADE"));
-  }
-  if (elements.tradeAccept) {
-    elements.tradeAccept.addEventListener("click", () => {
-      onIntent({ type: "ACCEPT_TRADE" });
-      closeTradeModal();
+  if (elements.tcFromCash) {
+    elements.tcFromCash.addEventListener("input", (event) => {
+      onIntent({ type: "TRADE_SET_CASH", payload: { side: "from", value: Number(event.target.value) || 0 } });
     });
   }
-  if (elements.tradeDecline) {
-    elements.tradeDecline.addEventListener("click", () => {
-      onIntent({ type: "DECLINE_TRADE" });
-      closeTradeModal();
+  if (elements.tcToCash) {
+    elements.tcToCash.addEventListener("input", (event) => {
+      onIntent({ type: "TRADE_SET_CASH", payload: { side: "to", value: Number(event.target.value) || 0 } });
     });
   }
-  if (elements.tradeCancel) {
-    elements.tradeCancel.addEventListener("click", () => {
-      onIntent({ type: "CANCEL_TRADE" });
-      closeTradeModal();
+  if (elements.tcFromList) {
+    elements.tcFromList.addEventListener("click", (event) => handleComposerChipToggle(event, "from"));
+  }
+  if (elements.tcToList) {
+    elements.tcToList.addEventListener("click", (event) => handleComposerChipToggle(event, "to"));
+  }
+  if (elements.tcFromCards) {
+    elements.tcFromCards.addEventListener("click", (event) => handleComposerCardToggle(event, "from"));
+  }
+  if (elements.tcToCards) {
+    elements.tcToCards.addEventListener("click", (event) => handleComposerCardToggle(event, "to"));
+  }
+  if (elements.tcSend) {
+    elements.tcSend.addEventListener("click", () => {
+      const draft = selectors.getTradeDraft(getState());
+      const wasCounter = Boolean(draft?.threadId);
+      onIntent({ type: "TRADE_SEND" });
+      showToast(wasCounter ? "Counter sent" : "Trade sent");
     });
   }
+  if (elements.tcClose) {
+    elements.tcClose.addEventListener("click", () => {
+      closeTradeComposer();
+      onIntent({ type: "CLOSE_TRADE_UI" });
+    });
+  }
+  if (elements.tradeComposerModal) {
+    elements.tradeComposerModal.addEventListener("click", (event) => {
+      if (event.target.dataset.tradeClose !== undefined || event.target === elements.tradeComposerModal) {
+        closeTradeComposer();
+        onIntent({ type: "CLOSE_TRADE_UI" });
+      }
+    });
+  }
+  if (elements.tradeInboundModal) {
+    elements.tradeInboundModal.addEventListener("click", (event) => {
+      if (event.target.dataset.tradeClose !== undefined || event.target === elements.tradeInboundModal) {
+        closeTradeInbound();
+      }
+    });
+  }
+  if (elements.tradeInboundAccept) {
+    elements.tradeInboundAccept.addEventListener("click", () => handleTradeDecision("TRADE_ACCEPT"));
+  }
+  if (elements.tradeInboundDecline) {
+    elements.tradeInboundDecline.addEventListener("click", () => handleTradeDeclineOrCancel());
+  }
+  if (elements.tradeInboundCounter) {
+    elements.tradeInboundCounter.addEventListener("click", () => handleTradeCounterRequest());
+  }
+  if (elements.tradeInboundClose) {
+    elements.tradeInboundClose.addEventListener("click", () => closeTradeInbound());
+  }
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      if (uiState.tradeComposerOpen) {
+        closeTradeComposer();
+        onIntent({ type: "CLOSE_TRADE_UI" });
+      } else if (uiState.tradePickerOpen) {
+        closeTradePicker();
+        onIntent({ type: "CLOSE_TRADE_UI" });
+      } else if (uiState.tradeInboundOpen) {
+        closeTradeInbound();
+      }
+    }
+  });
   if (elements.debtAutoBtn) {
     elements.debtAutoBtn.addEventListener("click", () => onIntent({ type: "AUTO_LIQUIDATE" }));
   }
@@ -185,9 +259,13 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     renderHeader(state);
     renderButtons(state);
     renderPlayers(state);
+    renderMyProperties(state);
     renderTileDetail(state);
     renderFinanceControls(state);
-    renderTradeModal(state);
+    renderTrades(state);
+    renderTradePicker(state);
+    renderTradeComposer(state);
+    renderTradeInbound(state);
     renderDebtModal(state);
     renderLog(state);
     renderChat();
@@ -277,15 +355,13 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     const player = selectors.getCurrentPlayer(state);
     const hasWinner = selectors.hasWinner(state);
     const debtActive = Boolean(state.debtContext?.active);
-    const tradePending = Boolean(selectors.getTrade(state)?.active);
-    const canRoll = !hasWinner && player && !player.bankrupt && state.turn.phase === "idle" && !debtActive && !tradePending;
+    const canRoll = !hasWinner && player && !player.bankrupt && state.turn.phase === "idle" && !debtActive;
     const canBuy = !hasWinner && selectors.canBuyCurrentTile(state) && !debtActive;
     const canEnd =
       !hasWinner &&
       player &&
       !player.bankrupt &&
       !debtActive &&
-      !tradePending &&
       (state.turn.phase === "resolved" || state.turn.allowExtraRoll || state.turn.mustEnd);
     const canPayBail = !hasWinner && player && player.inJail && !player.bankrupt && state.turn.phase === "idle" && player.cash >= state.config.bail;
     const canUseCard = !hasWinner && player && player.inJail && player.heldCards.some((card) => card.kind === "leaveJail");
@@ -300,16 +376,9 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
 
     if (elements.tradeBtn) {
       const activePlayers = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
-      const tradeState = selectors.getTrade(state);
-      const tradeActive = Boolean(tradeState?.active);
-      const canTrade = !hasWinner && player && !player.bankrupt && !tradeActive && activePlayers.length > 0;
+      const canTrade = !hasWinner && player && !player.bankrupt && activePlayers.length > 0;
       elements.tradeBtn.disabled = !canTrade;
-      const tradeTitle = tradeActive
-        ? "Finish or cancel the current trade first"
-        : canTrade
-        ? "Open trade builder"
-        : "Trading unavailable";
-      elements.tradeBtn.title = tradeTitle;
+      elements.tradeBtn.title = canTrade ? "Open trade builder" : "Trading unavailable";
     }
   }
 
@@ -581,253 +650,620 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     return tile.type === "property" || tile.type === "rail" || tile.type === "utility";
   }
 
-  function openTradeModal(partnerId) {
+  function openTradePicker() {
+    uiState.tradePickerOpen = true;
+    uiState.tradeComposerOpen = false;
+    uiState.tradeInboundOpen = false;
+  }
+
+  function closeTradePicker() {
+    uiState.tradePickerOpen = false;
+  }
+
+  function closeTradeComposer() {
+    uiState.tradeComposerOpen = false;
+    uiState.composerThreadId = null;
+    uiState.tradeComposerJustOpened = false;
+  }
+
+  function closeTradeInbound() {
+    uiState.tradeInboundOpen = false;
+    uiState.inboundThreadId = null;
+    uiState.inboundCanCancel = false;
+  }
+
+  function handleTradeThreadClick(event) {
+    const row = event.target.closest(".trade-row[data-trade-id]");
+    if (!row) return;
+    const tradeId = row.dataset.tradeId;
     const state = getState();
-    const player = selectors.getCurrentPlayer(state);
-    const partners = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
-    if (!partners.length) return;
-    const targetPartner = partnerId || uiState.tradePartnerId || partners[0].id;
-    uiState.tradePartnerId = targetPartner;
-    uiState.tradeModalOpen = true;
-    if (elements.tradeModal) {
-      elements.tradeModal.classList.remove("hidden");
-      elements.tradeModal.setAttribute("aria-hidden", "false");
-    }
-    if (targetPartner) {
-      onIntent({ type: "OPEN_TRADE", payload: { partnerId: targetPartner } });
-    }
-    renderTradeModal(getState());
+    const thread = selectors.getTradeById(state, tradeId);
+    if (!thread) return;
+    uiState.inboundThreadId = thread.id;
+    uiState.tradeInboundOpen = true;
+    uiState.tradePickerOpen = false;
+    uiState.tradeComposerOpen = false;
+    uiState.lastInboundThreadId = thread.id;
+    renderTradeInbound(state);
   }
 
-  function closeTradeModal() {
-    uiState.tradeModalOpen = false;
-    onIntent({ type: "CLOSE_TRADE" });
-    if (elements.tradeModal) {
-      elements.tradeModal.classList.add("hidden");
-      elements.tradeModal.setAttribute("aria-hidden", "true");
-    }
+  function handleTradePickClick(event) {
+    const row = event.target.closest(".pick-row[data-partner-id]");
+    if (!row) return;
+    const partnerId = row.dataset.partnerId;
+    closeTradePicker();
+    uiState.tradeComposerOpen = true;
+    uiState.tradeComposerJustOpened = true;
+    uiState.composerThreadId = null;
+    onIntent({ type: "OPEN_TRADE_COMPOSER", payload: { partnerId } });
   }
 
-  function populateTradePartners(state) {
-    if (!elements.tradePartner) return;
+  function handleComposerChipToggle(event, side) {
+    const chip = event.target.closest(".chip[data-tile-id]");
+    if (!chip) return;
+    const tileId = Number(chip.dataset.tileId);
+    if (!Number.isInteger(tileId)) return;
+    onIntent({ type: "TRADE_TOGGLE_PROP", payload: { side, tileId } });
+  }
+
+  function handleComposerCardToggle(event, side) {
+    const chip = event.target.closest(".chip[data-card]");
+    if (!chip) return;
+    onIntent({ type: "TRADE_TOGGLE_CARD", payload: { side, card: chip.dataset.card } });
+  }
+
+  function handleTradeDecision(intentType) {
+    if (!uiState.inboundThreadId) return;
+    onIntent({ type: intentType, payload: { tradeId: uiState.inboundThreadId } });
+    if (intentType === "TRADE_ACCEPT") {
+      showToast("Trade accepted");
+    } else if (intentType === "TRADE_DECLINE") {
+      showToast("Trade declined");
+    }
+    closeTradeInbound();
+  }
+
+  function handleTradeCounterRequest() {
+    if (!uiState.inboundThreadId) return;
+    onIntent({ type: "TRADE_COUNTER", payload: { tradeId: uiState.inboundThreadId } });
+    closeTradeInbound();
+    uiState.tradeComposerOpen = true;
+    uiState.tradeComposerJustOpened = true;
+  }
+
+  function handleTradeDeclineOrCancel() {
+    if (!uiState.inboundThreadId) return;
+    if (uiState.inboundCanCancel) {
+      onIntent({ type: "TRADE_CANCEL", payload: { tradeId: uiState.inboundThreadId } });
+      showToast("Trade cancelled");
+      closeTradeInbound();
+      return;
+    }
+    handleTradeDecision("TRADE_DECLINE");
+  }
+
+  function renderTrades(state) {
+    if (!elements.tradeThreads) return;
+    const threads = selectors.getTrades(state);
+    elements.tradeThreads.innerHTML = "";
     const player = selectors.getCurrentPlayer(state);
-    const partners = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
-    elements.tradePartner.innerHTML = "";
-    const fragment = document.createDocumentFragment();
-    if (!partners.length) {
-      const option = document.createElement("option");
-      option.textContent = "No partners available";
-      option.value = "";
-      fragment.appendChild(option);
-      uiState.tradePartnerId = null;
+    if (elements.tradeCreate) {
+      const availablePartners = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
+      elements.tradeCreate.disabled = !player || player.bankrupt || !availablePartners.length;
+    }
+
+    if (!threads.length) {
+      const empty = document.createElement("li");
+      empty.className = "trade-row empty";
+      empty.textContent = "No trades yet";
+      elements.tradeThreads.appendChild(empty);
     } else {
-      partners.forEach((partner) => {
-        const option = document.createElement("option");
-        option.value = partner.id;
-        option.textContent = `${partner.name} — $${partner.cash}`;
-        fragment.appendChild(option);
+      threads.forEach((thread) => {
+        const li = document.createElement("li");
+        li.className = "trade-row";
+        li.dataset.tradeId = thread.id;
+
+        const summary = document.createElement("div");
+        summary.className = "trade-summary";
+
+        const idRow = document.createElement("div");
+        idRow.className = "trade-id";
+        idRow.textContent = `#${thread.id}`;
+
+        const names = `${getPlayerLabel(state, thread.initiatorId)} ↔ ${getPlayerLabel(state, thread.partnerId)}`;
+        const details = document.createElement("div");
+        details.textContent = names;
+
+        const exchange = document.createElement("div");
+        exchange.textContent = summarizeTrade(state, thread.current);
+
+        summary.appendChild(idRow);
+        summary.appendChild(details);
+        summary.appendChild(exchange);
+
+        const status = document.createElement("span");
+        status.className = `trade-status ${thread.status}`;
+        status.textContent = tradeStatusLabel(thread.status);
+
+        li.appendChild(summary);
+        li.appendChild(status);
+        elements.tradeThreads.appendChild(li);
       });
-      if (!uiState.tradePartnerId || !partners.some((p) => p.id === uiState.tradePartnerId)) {
-        uiState.tradePartnerId = partners[0].id;
+    }
+
+    if (player) {
+      const inbound = threads.find((thread) => needsResponse(thread, player.id));
+      if (inbound && uiState.lastInboundThreadId !== inbound.id) {
+        uiState.inboundThreadId = inbound.id;
+        uiState.tradeInboundOpen = true;
+        uiState.lastInboundThreadId = inbound.id;
       }
     }
-    elements.tradePartner.appendChild(fragment);
-    elements.tradePartner.value = uiState.tradePartnerId || "";
   }
 
-  function renderTradeModal(state) {
-    if (!elements.tradeModal) return;
+  function renderTradePicker(state) {
+    if (!elements.tradePickModal) return;
+    const shouldOpen = uiState.tradePickerOpen;
+    if (!shouldOpen) {
+      elements.tradePickModal.classList.add("hidden");
+      elements.tradePickModal.setAttribute("aria-hidden", "true");
+      return;
+    }
+
     const player = selectors.getCurrentPlayer(state);
-    if (!player) {
-      closeTradeModal();
+    const partners = selectors.getActivePlayers(state).filter((p) => p.id !== (player?.id ?? null));
+    if (!partners.length) {
+      elements.tradePickList.innerHTML = "<li class=\"pick-row\">No partners available</li>";
+    } else {
+      elements.tradePickList.innerHTML = "";
+      partners.forEach((partner) => {
+        const li = document.createElement("li");
+        li.className = "pick-row";
+        li.dataset.partnerId = partner.id;
+        li.innerHTML = `
+          <span class="player-info">
+            <span class="mini-avatar" style="background:${partner.color}"></span>
+            <span>${escapeHtml(partner.name)}</span>
+          </span>
+          <span class="player-cash">$${partner.cash}</span>
+        `;
+        elements.tradePickList.appendChild(li);
+      });
+    }
+    elements.tradePickModal.classList.remove("hidden");
+    elements.tradePickModal.setAttribute("aria-hidden", "false");
+  }
+
+  function renderTradeComposer(state) {
+    if (!elements.tradeComposerModal) return;
+    const draft = selectors.getTradeDraft(state);
+    const fromPlayer = selectors.getPlayerById(state, draft?.from?.playerId);
+    const toPlayer = selectors.getPlayerById(state, draft?.to?.playerId);
+
+    if (draft.active && !uiState.tradeComposerOpen) {
+      uiState.tradeComposerOpen = true;
+      uiState.composerThreadId = draft.threadId || null;
+      uiState.tradePickerOpen = false;
+      uiState.tradeInboundOpen = false;
+      uiState.tradeComposerJustOpened = true;
+    }
+
+    if (!uiState.tradeComposerOpen || !draft.active || !fromPlayer || !toPlayer) {
+      closeTradeComposer();
+      elements.tradeComposerModal.classList.add("hidden");
+      elements.tradeComposerModal.setAttribute("aria-hidden", "true");
       return;
     }
 
-    const trade = selectors.getTrade(state);
-    const isParticipant = trade.active && (trade.initiatorId === player.id || trade.partnerId === player.id);
+    elements.tradeComposerModal.classList.remove("hidden");
+    elements.tradeComposerModal.setAttribute("aria-hidden", "false");
 
-    if (trade.active && isParticipant) {
-      uiState.tradeModalOpen = true;
-      uiState.tradePartnerId = player.id === trade.initiatorId ? trade.partnerId : trade.initiatorId;
-    } else if (!trade.active && !uiState.tradeModalOpen) {
-      // no-op
-    } else if (!trade.active && uiState.tradeModalOpen) {
-      uiState.tradeModalOpen = false;
+    const title = draft.threadId ? "Counter trade" : "Create a trade";
+    const titleEl = elements.tradeComposerModal.querySelector("#trade-composer-title");
+    if (titleEl) titleEl.textContent = title;
+
+    renderComposerPlayer(elements.tradeComposerModal.querySelector("#tc-from-header"), fromPlayer);
+    renderComposerPlayer(elements.tradeComposerModal.querySelector("#tc-to-header"), toPlayer);
+
+    updateCashSlider(elements.tcFromCash, elements.tcFromCashPill, draft.from.cash, fromPlayer.cash);
+    updateCashSlider(elements.tcToCash, elements.tcToCashPill, draft.to.cash, toPlayer.cash);
+
+    buildPropertyChips(elements.tcFromList, state, fromPlayer.id, new Set(draft.from.properties), "from");
+    buildPropertyChips(elements.tcToList, state, toPlayer.id, new Set(draft.to.properties), "to");
+    buildCardChips(elements.tcFromCards, fromPlayer, draft.from.cards, "from");
+    buildCardChips(elements.tcToCards, toPlayer, draft.to.cards, "to");
+
+    if (elements.tcError) {
+      const errorKey = draft.validationError;
+      if (errorKey) {
+        elements.tcError.textContent = tradeErrorMessage(errorKey);
+        elements.tcError.classList.remove("hidden");
+      } else {
+        elements.tcError.textContent = "";
+        elements.tcError.classList.add("hidden");
+      }
     }
 
-    if (!uiState.tradeModalOpen) {
-      elements.tradeModal.classList.add("hidden");
-      elements.tradeModal.setAttribute("aria-hidden", "true");
-      return;
-    }
-
-    elements.tradeModal.classList.remove("hidden");
-    elements.tradeModal.setAttribute("aria-hidden", "false");
-
-    populateTradePartners(state);
-
-    const partnerId = uiState.tradePartnerId;
-    const partner = state.players.find((p) => p.id === partnerId) || null;
-    if (!partner) {
-      if (elements.tradeOfferProps) elements.tradeOfferProps.innerHTML = "";
-      if (elements.tradeRequestProps) elements.tradeRequestProps.innerHTML = "";
-      return;
-    }
-
-    const viewingInitiator = trade.active && trade.initiatorId === player.id && trade.partnerId === partner.id;
-    const viewingPartner = trade.active && trade.partnerId === player.id && trade.initiatorId === partner.id;
-    const tradeMatches = viewingInitiator || viewingPartner;
-
-    const youGive = tradeMatches ? (viewingInitiator ? trade.offer : trade.request) : null;
-    const youReceive = tradeMatches ? (viewingInitiator ? trade.request : trade.offer) : null;
-
-    if (elements.tradeOfferCash) {
-      elements.tradeOfferCash.value = youGive ? youGive.cash ?? 0 : 0;
-    }
-    if (elements.tradeRequestCash) {
-      elements.tradeRequestCash.value = youReceive ? youReceive.cash ?? 0 : 0;
-    }
-
-    if (elements.tradeOfferProps) {
-      const playerTiles = tileData.filter(
-        (tile) => isMortgageableTile(tile) && state.tileOwnership?.[tile.id] === player.id
-      );
-      const selected = new Set(youGive ? youGive.properties : []);
-      buildTradePropertyList(elements.tradeOfferProps, playerTiles, selected, state);
-    }
-
-    if (elements.tradeRequestProps) {
-      const partnerTiles = tileData.filter(
-        (tile) => isMortgageableTile(tile) && state.tileOwnership?.[tile.id] === partner.id
-      );
-      const selected = new Set(youReceive ? youReceive.properties : []);
-      buildTradePropertyList(elements.tradeRequestProps, partnerTiles, selected, state);
-    }
-
-    renderTradeFairness(state, trade);
-
-    const awaitingId = trade.active
-      ? trade.status === "proposed"
-        ? trade.partnerId
-        : trade.status === "countered"
-        ? trade.initiatorId
-        : null
-      : null;
-    const canAccept = trade.active && (trade.status === "proposed" || trade.status === "countered");
-
-    if (elements.tradePropose) {
-      elements.tradePropose.disabled = !(partner && trade.active && trade.status === "idle" && trade.initiatorId === player.id);
-    }
-    if (elements.tradeCounter) {
-      elements.tradeCounter.disabled = !(trade.active && awaitingId === player.id);
-    }
-    if (elements.tradeAccept) {
-      elements.tradeAccept.disabled = !(canAccept && awaitingId === player.id);
-    }
-    if (elements.tradeDecline) {
-      elements.tradeDecline.disabled = !(canAccept && awaitingId === player.id);
-    }
-    if (elements.tradeCancel) {
-      elements.tradeCancel.disabled = !(trade.active && trade.initiatorId === player.id);
+    if (uiState.tradeComposerJustOpened) {
+      uiState.tradeComposerJustOpened = false;
+      if (elements.tcFromCash) {
+        elements.tcFromCash.focus();
+      } else if (elements.tcSend) {
+        elements.tcSend.focus();
+      }
     }
   }
 
-  function renderTradeFairness(state, trade) {
-    if (!elements.tradeFairness) return;
-    if (!trade || !trade.active) {
-      elements.tradeFairness.textContent = "Fairness: —";
-      elements.tradeFairness.className = "fairness";
+  function renderTradeInbound(state) {
+    if (!elements.tradeInboundModal) return;
+    const threadId = uiState.inboundThreadId;
+    const thread = threadId ? selectors.getTradeById(state, threadId) : null;
+    if (!uiState.tradeInboundOpen || !thread) {
+      closeTradeInbound();
+      elements.tradeInboundModal.classList.add("hidden");
+      elements.tradeInboundModal.setAttribute("aria-hidden", "true");
       return;
     }
-    const fairness = trade.fairness || { ratio: 1, verdict: "balanced" };
-    const ratioText = Number.isFinite(fairness.ratio) && fairness.ratio > 0 ? fairness.ratio.toFixed(2) : "—";
-    let verdictText = "Balanced";
-    let extraClass = "";
+
+    if (thread.status === "accepted" || thread.status === "declined" || thread.status === "cancelled") {
+      closeTradeInbound();
+      elements.tradeInboundModal.classList.add("hidden");
+      elements.tradeInboundModal.setAttribute("aria-hidden", "true");
+      return;
+    }
+
     const current = selectors.getCurrentPlayer(state);
-    const currentId = current?.id;
-    if (fairness.verdict === "initiator_gains") {
-      verdictText = trade.initiatorId === currentId ? "You gain" : "They gain";
-      extraClass = " fairness-initiator";
-    } else if (fairness.verdict === "partner_gains") {
-      verdictText = trade.partnerId === currentId ? "You gain" : "They gain";
-      extraClass = " fairness-partner";
+    const awaiting = current && needsResponse(thread, current.id);
+    const isInitiator = current && current.id === thread.initiatorId;
+    const canCancel = isInitiator && !awaiting && (thread.status === "pending" || thread.status === "countered");
+    uiState.inboundCanCancel = Boolean(canCancel);
+    const body = elements.tradeInboundBody;
+    body.innerHTML = "";
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "inbound-offer";
+    wrapper.appendChild(buildInboundColumn(state, thread.current.from, "They give"));
+    wrapper.appendChild(buildInboundColumn(state, thread.current.to, "You give"));
+    body.appendChild(wrapper);
+
+    const evaluation = assessTradeSnapshot(state, thread.current);
+    const issue = evaluation.issues[0] || null;
+    const noteTarget = elements.tradeInboundNote;
+    let noteMessage = "";
+    if (issue) {
+      noteMessage = tradeIssueMessage(state, issue);
+    } else if (!awaiting) {
+      noteMessage = "Waiting for the other player to respond.";
     }
-    elements.tradeFairness.className = `fairness${extraClass}`.trim();
-    elements.tradeFairness.textContent = `Fairness: ${verdictText} (ratio ${ratioText})`;
+    if (noteTarget) {
+      if (noteMessage) {
+        noteTarget.textContent = noteMessage;
+        noteTarget.classList.remove("hidden");
+      } else {
+        noteTarget.textContent = "";
+        noteTarget.classList.add("hidden");
+      }
+    }
+
+    const title = elements.tradeInboundModal.querySelector("#trade-inbound-title");
+    if (title) {
+      title.textContent = awaiting ? "Incoming trade" : "Trade overview";
+    }
+
+    if (elements.tradeInboundAccept) {
+      elements.tradeInboundAccept.disabled = !awaiting || !evaluation.valid;
+    }
+    if (elements.tradeInboundCounter) {
+      elements.tradeInboundCounter.disabled = !awaiting;
+    }
+    if (elements.tradeInboundDecline) {
+      elements.tradeInboundDecline.textContent = awaiting ? "Decline" : "Cancel";
+      elements.tradeInboundDecline.disabled = !(awaiting || canCancel);
+    }
+
+    if (!awaiting) {
+      elements.tradeInboundModal.classList.add("readonly");
+    } else {
+      elements.tradeInboundModal.classList.remove("readonly");
+    }
+
+    elements.tradeInboundModal.classList.remove("hidden");
+    elements.tradeInboundModal.setAttribute("aria-hidden", "false");
   }
 
-  function buildTradePropertyList(container, tiles, selectedIds, state) {
-    container.innerHTML = "";
-    if (!tiles.length) {
+  function renderMyProperties(state) {
+    if (!elements.myPropertiesList) return;
+    const player = selectors.getCurrentPlayer(state);
+    elements.myPropertiesList.innerHTML = "";
+    if (!player) return;
+
+    const owned = player.owned
+      .map((id) => BOARD_TILES.find((tile) => tile.id === id))
+      .filter((tile) => tile && (tile.type === "property" || tile.type === "rail" || tile.type === "utility"));
+
+    if (!owned.length) {
       const empty = document.createElement("div");
-      empty.className = "prop-empty";
+      empty.className = "chip small";
       empty.textContent = "No properties";
+      elements.myPropertiesList.appendChild(empty);
+      return;
+    }
+
+    owned.forEach((tile) => {
+      const chip = document.createElement("span");
+      chip.className = "chip small";
+      chip.textContent = `${tile.name} — $${tile.price || 0}`;
+      elements.myPropertiesList.appendChild(chip);
+    });
+  }
+
+  function renderComposerPlayer(container, player) {
+    if (!container || !player) return;
+    container.innerHTML = `
+      <span class="mini-avatar" style="background:${player.color}"></span>
+      <span>${escapeHtml(player.name)}</span>
+      <span class="player-cash">$${player.cash}</span>
+    `;
+  }
+
+  function updateCashSlider(input, pill, value, max) {
+    if (!input || !pill) return;
+    const clampedMax = Math.max(0, Number(max) || 0);
+    input.max = clampedMax;
+    const safeValue = Math.max(0, Math.min(clampedMax, Number(value) || 0));
+    input.value = safeValue;
+    pill.textContent = `${safeValue} $`;
+    const percent = clampedMax > 0 ? (safeValue / clampedMax) * 100 : 0;
+    pill.style.setProperty("--percent", `${percent}%`);
+  }
+
+  function buildPropertyChips(container, state, ownerId, selectedSet, side) {
+    if (!container) return;
+    container.innerHTML = "";
+    const tiles = BOARD_TILES.filter((tile) =>
+      (tile.type === "property" || tile.type === "rail" || tile.type === "utility") &&
+      state.tileOwnership?.[tile.id] === ownerId
+    );
+    if (!tiles.length) {
+      const empty = document.createElement("span");
+      empty.className = "chip small disabled";
+      empty.textContent = "No assets";
       container.appendChild(empty);
       return;
     }
     tiles.forEach((tile) => {
-      const label = document.createElement("label");
-      const input = document.createElement("input");
-      input.type = "checkbox";
-      input.value = tile.id;
-      input.checked = selectedIds.has(tile.id);
-      label.appendChild(input);
-
-      const nameSpan = document.createElement("span");
-      nameSpan.textContent = tile.name;
-      label.appendChild(nameSpan);
-
-      if (state.mortgages?.[tile.id]) {
-        const badge = document.createElement("span");
-        badge.className = "mortgaged-tag";
-        badge.textContent = "M";
-        label.appendChild(badge);
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.tileId = tile.id;
+      chip.innerHTML = `
+        <span class="chip-icon" aria-hidden="true">🏷</span>
+        <span>${escapeHtml(tile.name)}</span>
+        <span class="chip-price">$${tile.price || 0}</span>
+      `;
+      if (selectedSet.has(tile.id)) {
+        chip.classList.add("selected");
       }
-
-      const houses = selectors.getHouseCount(state, tile.id);
-      if (houses > 0) {
-        const info = document.createElement("span");
-        info.className = "prop-house-info";
-        info.textContent = ` (${houses} house${houses === 1 ? "" : "s"})`;
-        label.appendChild(info);
-      }
-
-      container.appendChild(label);
+      container.appendChild(chip);
     });
   }
 
-  function collectTradeSide(container, cashInput) {
-    const properties = [];
-    if (container) {
-      container.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
-        if (checkbox.checked) {
-          const id = parseInt(checkbox.value, 10);
-          if (Number.isInteger(id)) {
-            properties.push(id);
-          }
+  function buildCardChips(container, player, selectedCards, side) {
+    if (!container) return;
+    container.innerHTML = "";
+    const hasCard = getLeaveCardCount(player) > 0;
+    if (!hasCard) {
+      const empty = document.createElement("span");
+      empty.className = "chip small disabled";
+      empty.textContent = "No cards";
+      container.appendChild(empty);
+      return;
+    }
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.card = "leaveJail";
+    chip.innerHTML = `
+      <span class="chip-icon" aria-hidden="true">🔑</span>
+      <span>Get out of jail</span>
+    `;
+    if (selectedCards.includes("leaveJail")) {
+      chip.classList.add("selected");
+    }
+    container.appendChild(chip);
+  }
+
+  function getLeaveCardCount(player) {
+    if (!player || !Array.isArray(player.heldCards)) return 0;
+    return player.heldCards.filter((card) => card.kind === "leaveJail").length;
+  }
+
+  function buildInboundColumn(state, side, title) {
+    const column = document.createElement("div");
+    column.className = "inbound-column";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    column.appendChild(heading);
+
+    const player = selectors.getPlayerById(state, side.playerId);
+    if (player) {
+      const info = document.createElement("div");
+      info.className = "composer-player";
+      info.innerHTML = `
+        <span class="mini-avatar" style="background:${player.color}"></span>
+        <span>${escapeHtml(player.name)}</span>
+      `;
+      column.appendChild(info);
+    }
+
+    const summary = document.createElement("div");
+    summary.className = "inbound-summary";
+    summary.textContent = describeContribution(state, side);
+    column.appendChild(summary);
+
+    const chipGrid = document.createElement("div");
+    chipGrid.className = "chip-grid";
+    side.properties.forEach((tileId) => {
+      const tile = BOARD_TILES.find((t) => t.id === tileId);
+      if (!tile) return;
+      const chip = document.createElement("span");
+      chip.className = "chip small";
+      chip.textContent = `${tile.name} ($${tile.price || 0})`;
+      chipGrid.appendChild(chip);
+    });
+    if (!side.properties.length) {
+      const empty = document.createElement("span");
+      empty.className = "chip small disabled";
+      empty.textContent = "No properties";
+      chipGrid.appendChild(empty);
+    }
+    column.appendChild(chipGrid);
+    return column;
+  }
+
+  function getPlayerLabel(state, playerId) {
+    const player = selectors.getPlayerById(state, playerId);
+    return player ? player.name : "Unknown";
+  }
+
+  function summarizeTrade(state, snapshot) {
+    if (!snapshot) return "—";
+    const left = describeContribution(state, snapshot.from);
+    const right = describeContribution(state, snapshot.to);
+    return `${left} ⇄ ${right}`;
+  }
+
+  function describeContribution(state, side) {
+    const parts = [];
+    if (side.cash > 0) {
+      parts.push(`$${side.cash}`);
+    }
+    if (side.properties?.length) {
+      const names = side.properties
+        .map((id) => BOARD_TILES.find((tile) => tile.id === id))
+        .filter(Boolean)
+        .map((tile) => tile.name);
+      const [first, second, ...rest] = names;
+      if (first) parts.push(first);
+      if (second) parts.push(second);
+      if (rest.length) parts.push(`+${rest.length} more`);
+    }
+    if (side.cards?.includes("leaveJail")) {
+      parts.push("Jail card");
+    }
+    if (!parts.length) {
+      return "Nothing";
+    }
+    return parts.join(" & ");
+  }
+
+  function tradeStatusLabel(status) {
+    switch (status) {
+      case "pending":
+        return "Pending";
+      case "countered":
+        return "Countered";
+      case "accepted":
+        return "Accepted";
+      case "declined":
+        return "Declined";
+      case "cancelled":
+        return "Cancelled";
+      default:
+        return status;
+    }
+  }
+
+  function needsResponse(thread, playerId) {
+    if (!thread) return false;
+    if (thread.status !== "pending" && thread.status !== "countered") return false;
+    return thread.current?.to?.playerId === playerId;
+  }
+
+  function assessTradeSnapshot(state, snapshot) {
+    const issues = [];
+    if (!snapshot) {
+      issues.push({ reason: "missing" });
+      return { valid: false, issues };
+    }
+    assessTradeSide(state, snapshot.from, issues);
+    assessTradeSide(state, snapshot.to, issues);
+    return { valid: issues.length === 0, issues };
+  }
+
+  function assessTradeSide(state, side, issues) {
+    if (!side) {
+      issues.push({ reason: "missing" });
+      return;
+    }
+    const player = selectors.getPlayerById(state, side.playerId);
+    if (!player || player.bankrupt) {
+      issues.push({ reason: "player", playerId: side.playerId });
+      return;
+    }
+    const ownership = state.tileOwnership || {};
+    if (Array.isArray(side.properties)) {
+      side.properties.forEach((tileId) => {
+        if (ownership[tileId] !== player.id) {
+          issues.push({ reason: "ownership", playerId: player.id, tileId });
         }
       });
     }
-    let cashValue = cashInput ? Math.max(0, Math.floor(Number(cashInput.value) || 0)) : 0;
-    if (cashInput) {
-      cashInput.value = cashValue;
+    const cash = Math.max(0, Number(side.cash) || 0);
+    if (cash > player.cash) {
+      issues.push({ reason: "cash", playerId: player.id });
     }
-    return { cash: cashValue, properties };
+    if (Array.isArray(side.cards) && side.cards.includes("leaveJail") && getLeaveCardCount(player) < 1) {
+      issues.push({ reason: "card_missing", playerId: player.id });
+    }
   }
 
-  function submitTradeProposal(kind) {
-    if (!uiState.tradePartnerId) return;
-    const state = getState();
-    const trade = selectors.getTrade(state);
-    const player = selectors.getCurrentPlayer(state);
-    const isInitiator = trade.active ? trade.initiatorId === player.id : true;
-    const youGive = collectTradeSide(elements.tradeOfferProps, elements.tradeOfferCash);
-    const youReceive = collectTradeSide(elements.tradeRequestProps, elements.tradeRequestCash);
-    const payload = isInitiator
-      ? { offer: youGive, request: youReceive }
-      : { offer: youReceive, request: youGive };
-    onIntent({ type: kind, payload });
+  function tradeIssueMessage(state, issue) {
+    switch (issue?.reason) {
+      case "ownership": {
+        const tile = BOARD_TILES.find((t) => t.id === issue.tileId);
+        const tileName = tile ? tile.name : "An asset";
+        return `${tileName} changed hands. Please update the offer.`;
+      }
+      case "cash": {
+        const player = selectors.getPlayerById(state, issue.playerId);
+        const name = player ? player.name : "A player";
+        return `${name} no longer has enough cash for this offer.`;
+      }
+      case "card_missing": {
+        const player = selectors.getPlayerById(state, issue.playerId);
+        const name = player ? player.name : "Player";
+        return `${name} no longer holds a Get out of Jail card.`;
+      }
+      case "player":
+        return "One of the players is unavailable for trading.";
+      case "missing":
+      default:
+        return "Offer data is outdated. Please refresh the trade.";
+    }
   }
+
+  function tradeErrorMessage(code) {
+    switch (code) {
+      case "ownership":
+      case "duplicate_prop":
+      case "prop":
+        return "This offer includes assets that changed ownership.";
+      case "cash":
+      case "cash_exceeds":
+        return "Cash amount exceeds the player’s available funds.";
+      case "card_missing":
+      case "cards":
+        return "Card selection is no longer available.";
+      case "invalid_players":
+      case "player":
+        return "Selected player cannot trade right now.";
+      case "shape":
+      case "inactive":
+        return "Trade data is incomplete. Please try again.";
+      default:
+        return "Unable to send the trade. Please review and adjust.";
+    }
+  }
+
 
   function renderDebtModal(state) {
     if (!elements.debtModal) return;
@@ -1070,19 +1506,25 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
   }
 
   function showToast(message) {
-    if (!elements.toast) return;
-    elements.toast.textContent = message;
-    elements.toast.classList.remove("hidden");
-    elements.toast.classList.add("visible");
-    if (uiState.toastTimeout) {
-      clearTimeout(uiState.toastTimeout);
+    if (!elements.toastRoot) return;
+    const item = document.createElement("div");
+    item.className = "toast-item";
+    item.textContent = message;
+    elements.toastRoot.appendChild(item);
+    requestAnimationFrame(() => item.classList.add("visible"));
+    setTimeout(() => {
+      item.classList.remove("visible");
+      setTimeout(() => {
+        if (item.parentElement) {
+          item.parentElement.removeChild(item);
+        }
+      }, 300);
+    }, 2200);
+
+    const maxToasts = 3;
+    while (elements.toastRoot.children.length > maxToasts) {
+      elements.toastRoot.removeChild(elements.toastRoot.firstChild);
     }
-    uiState.toastTimeout = setTimeout(() => {
-      if (elements.toast) {
-        elements.toast.classList.remove("visible");
-        elements.toast.classList.add("hidden");
-      }
-    }, 1800);
   }
 
   function handleDebtListClick(event, intentType) {
@@ -1111,7 +1553,11 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
     if (!button) return;
     const partnerId = button.dataset.partnerId;
     if (!partnerId) return;
-    openTradeModal(partnerId);
+    openTradePicker();
+    onIntent({ type: "OPEN_TRADE_PICKER" });
+    uiState.tradePickerOpen = false;
+    uiState.tradeComposerOpen = true;
+    onIntent({ type: "OPEN_TRADE_COMPOSER", payload: { partnerId } });
   }
 
   function maybeShowCard(state) {
@@ -1312,6 +1758,12 @@ export function createUI({ elements, boardApi, onIntent, getState }) {
       uiState.chatMessages = [];
       uiState.lastChatLogId = 0;
       renderChat();
+    },
+    resetTradeUI() {
+      closeTradePicker();
+      closeTradeComposer();
+      closeTradeInbound();
+      onIntent({ type: "CLOSE_TRADE_UI" });
     },
   };
 }
