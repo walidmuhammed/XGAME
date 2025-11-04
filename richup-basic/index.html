@@ -12,30 +12,31 @@
 <body>
   <svg aria-hidden="true" focusable="false" class="icon-sprite">
     <symbol id="icon-handshake" viewBox="0 0 24 24">
-      <path d="M3 12.5 7.5 8l4.5 4 4-4 5 5.5-2.2 2.1-1.8-1.8-2.8 2.8-2.7-2.7-1.9 1.9z" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"/>
+      <path d="M3.2 12.3 7.4 8l4.6 4.1 3.8-3.9 5 5.4-2.2 2.1-1.7-1.7-2.7 2.8-2.8-2.8-1.9 1.9z" fill="currentColor"/>
     </symbol>
     <symbol id="icon-house" viewBox="0 0 24 24">
-      <path d="M4 11.5 12 5l8 6.5v7.5h-5.5v-5h-5v5H4z" fill="currentColor"/>
+      <path d="M4 11.5 12 5l8 6.5v8.5h-6v-5h-4v5H4z" fill="currentColor"/>
     </symbol>
     <symbol id="icon-arrow-double" viewBox="0 0 24 24">
-      <path d="M7 5 3 9l4 4v-3h6V8H7zM17 5v3h-6v2h6v3l4-4z" fill="currentColor"/>
+      <path d="M6.5 5 3 9l3.5 4V9.5h6V8h-6V5zm11 0v3h-6v1.5h6V13l3.5-4-3.5-4z" fill="currentColor"/>
     </symbol>
     <symbol id="icon-coin" viewBox="0 0 24 24">
       <path d="M12 4c-4.4 0-8 2-8 4.5v7c0 2.5 3.6 4.5 8 4.5s8-2 8-4.5v-7C20 6 16.4 4 12 4Zm6 11.5c0 1.2-2.4 2.5-6 2.5s-6-1.3-6-2.5v-2c1.5 1 3.7 1.5 6 1.5s4.5-.5 6-1.5v2Zm-6-3c-3.6 0-6-1.3-6-2.5S8.4 7.5 12 7.5s6 1.3 6 2.5-2.4 2.5-6 2.5Z" fill="currentColor"/>
     </symbol>
     <symbol id="icon-card" viewBox="0 0 24 24">
-      <rect x="3" y="6" width="18" height="12" rx="2" ry="2" fill="currentColor" opacity="0.2"/>
+      <rect x="3" y="6" width="18" height="12" rx="2" ry="2" fill="currentColor" opacity="0.18"/>
       <rect x="3" y="6" width="18" height="12" rx="2" ry="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
       <path d="M6 10h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
     </symbol>
   </svg>
-  <div class="app-shell">
+
+  <main id="shell" class="shell">
     <header class="app-header">
       <div class="brand">
         <span class="brand-badge">R</span>
         <span>RICHUP Prototype</span>
       </div>
-      <div class="header-actions">
+      <nav class="header-actions" aria-label="App controls">
         <button type="button" class="icon-btn" aria-label="Controller">
           <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#gamepad-2"></use></svg>
         </button>
@@ -45,135 +46,105 @@
         <button type="button" class="icon-btn" aria-label="Sound">
           <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#volume-2"></use></svg>
         </button>
-      </div>
+      </nav>
     </header>
 
-    <main class="shell-grid">
-      <aside class="shell-left">
-        <section class="card share-card">
-          <div class="card-header">
+    <div class="content">
+      <aside id="left-col" class="column">
+        <section id="share-card" class="card share-card">
+          <header class="card-header">
             <div class="card-title">
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#share-2"></use></svg>
               Share this game
             </div>
-          </div>
+          </header>
           <div class="share-body">
             <input id="share-url" class="share-input" type="text" readonly>
-            <button id="share-copy" class="btn primary sm" type="button">Copy</button>
+            <button id="share-copy" class="btn ghost" type="button">Copy</button>
           </div>
         </section>
 
-        <section class="card chat-card">
-          <div class="card-header">
+        <section id="chat-card" class="card chat-card">
+          <header class="card-header">
             <div class="card-title">
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#message-circle"></use></svg>
               Chat
             </div>
-          </div>
-          <div class="chat-body">
+          </header>
+          <div class="chat-body scrolly">
             <ul id="chat-list" class="chat-list"></ul>
           </div>
           <form class="chat-composer" id="chat-form">
             <input id="chat-input" type="text" placeholder="Say something…" autocomplete="off">
-            <button id="chat-send" class="icon-btn send" type="submit" aria-label="Send">
+            <button id="chat-send" class="icon-btn send" type="submit" aria-label="Send message">
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#send"></use></svg>
             </button>
           </form>
         </section>
       </aside>
 
-      <section class="shell-center">
-        <div class="stage">
-          <div class="board-frame">
-            <svg id="board-svg" viewBox="0 0 600 600" role="img" aria-label="Richup board"></svg>
-            <div id="dice-overlay" class="dice-overlay"></div>
-            <div id="start-overlay" class="start-overlay">
-              <button id="start-btn" class="btn primary lg">Start Game</button>
-            </div>
+      <section id="center-col" class="column">
+        <section id="stage">
+          <svg id="board-svg" viewBox="0 0 800 800" role="img" aria-label="Richup board"></svg>
+          <div id="dice-overlay" class="dice-overlay"></div>
+          <div id="action-dock" class="action-dock">
+            <div class="dock" role="toolbar" aria-label="Turn actions"></div>
           </div>
-        </div>
-
-        <div class="center-lower">
-          <section class="card turn-card">
-            <div class="turn-meta">
-              <div id="turn-info" class="turn-info"></div>
-              <div class="dice-readout" id="dice-result">Roll to start</div>
-            </div>
-            <div class="control-buttons">
-              <button id="roll-btn" class="btn primary">Roll Dice</button>
-              <button id="buy-btn" class="btn ghost" disabled>Buy</button>
-              <button id="end-btn" class="btn ghost" disabled>End Turn</button>
-              <button id="pay-bail-btn" class="btn ghost" disabled>Pay Bail</button>
-              <button id="use-card-btn" class="btn ghost" disabled>Use Card</button>
-              <button id="build-btn" class="btn ghost hidden" disabled>Build +</button>
-              <button id="sell-btn" class="btn ghost hidden" disabled>Sell −</button>
-              <button id="trade-btn" class="btn ghost">Trade</button>
-            </div>
-          </section>
-
-          <section class="card property-card">
-            <div class="card-header">
-              <div class="card-title">
-                <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#map"></use></svg>
-                Property details
-              </div>
-            </div>
-            <div id="structure-icons" class="structure-icons muted">—</div>
-            <div id="structure-info" class="structure-info"></div>
-            <div class="finance-panel" id="finance-panel">
-              <div class="finance-title">Finance</div>
-              <div class="finance-actions">
-                <button id="mortgage-btn" class="btn ghost" disabled>Mortgage</button>
-                <button id="unmortgage-btn" class="btn ghost" disabled>Unmortgage</button>
-              </div>
-            </div>
-            <div id="tile-detail" class="tile-detail">Select a tile</div>
-          </section>
-        </div>
+          <div id="start-overlay" class="start-overlay">
+            <button id="start-btn" class="btn primary">Start Game</button>
+          </div>
+        </section>
+        <div id="prop-card" class="card prop-card hidden" role="dialog" aria-modal="true" aria-live="polite"></div>
       </section>
 
-      <aside class="shell-right">
-        <section class="card trades-card">
-          <div class="card-header">
-            <div class="card-title">
-              <svg class="icon" viewBox="0 0 24 24"><use href="#icon-handshake"></use></svg>
-              Trades
-            </div>
-            <button id="trade-create" class="btn-cta" type="button">Create</button>
-          </div>
-          <ul id="trade-threads" class="trades-list"></ul>
-        </section>
-
-        <section class="card players-card">
-          <div class="card-header">
+      <aside id="right-col" class="column">
+        <section id="players-card" class="card players-card">
+          <header class="card-header">
             <div class="card-title">
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#users"></use></svg>
               Players
             </div>
             <button id="appearance-open" class="btn ghost sm" type="button">Change appearance</button>
-          </div>
+          </header>
           <div id="current-player" class="current-player-chip"></div>
-          <ul id="player-list" class="player-list"></ul>
+          <ul id="player-list" class="players-list scrolly" tabindex="0"></ul>
         </section>
 
-        <section class="card properties-card">
-          <div class="card-header">
+        <section id="trades-card" class="card trades-card">
+          <header class="card-header">
+            <div class="card-title">
+              <svg class="icon" viewBox="0 0 24 24"><use href="#icon-handshake"></use></svg>
+              Trades
+            </div>
+            <button id="trade-create" class="btn primary sm" type="button">Create</button>
+          </header>
+          <ul id="trade-threads" class="trades-list scrolly"></ul>
+        </section>
+
+        <section id="props-card" class="card properties-card">
+          <header class="card-header">
             <div class="card-title">
               <svg class="icon" viewBox="0 0 24 24"><use href="#icon-house"></use></svg>
               My properties
             </div>
+          </header>
+          <div class="properties-body scrolly">
+            <ul id="my-properties-list" class="chip-list"></ul>
           </div>
-          <ul id="my-properties-list" class="chip-list"></ul>
+          <footer class="finance-footer">
+            <button id="mortgage-btn" class="btn ghost" type="button" disabled>Mortgage</button>
+            <button id="unmortgage-btn" class="btn ghost" type="button" disabled>Unmortgage</button>
+          </footer>
         </section>
 
-        <section class="card settings-card">
-          <div class="card-header">
+        <section id="settings-card" class="card settings-card">
+          <header class="card-header">
             <div class="card-title">
               <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#settings-2"></use></svg>
               Game settings
             </div>
-          </div>
-          <div class="settings-body">
+          </header>
+          <div class="settings-body scrolly">
             <div class="setting-row">
               <span class="setting-label">Maximum players</span>
               <span class="setting-value" id="max-players-label">—</span>
@@ -192,20 +163,15 @@
           <button id="new-game-btn" class="btn primary full" type="button">New Game</button>
         </section>
       </aside>
-    </main>
+    </div>
 
-    <footer class="log-card">
-      <div class="card-header">
-        <div class="card-title">
-          <svg class="icon" viewBox="0 0 24 24"><use href="https://unpkg.com/lucide-static@latest/icons.svg#list"></use></svg>
-          Action log
-        </div>
-      </div>
-      <ul id="log-list" class="log-list"></ul>
-    </footer>
+    <details id="log-drawer" class="log-drawer">
+      <summary>Action log</summary>
+      <ul id="log-list" class="log-list scrolly"></ul>
+    </details>
 
     <div id="toast-root" class="toast-root" role="status" aria-live="polite"></div>
-  </div>
+  </main>
 
   <div class="modal hidden" id="card-modal" aria-hidden="true" role="dialog">
     <div class="modal-content">
@@ -219,7 +185,7 @@
     <div class="modal-content trade-picker">
       <button class="modal-close" type="button" data-trade-close>&times;</button>
       <h2>Create a trade</h2>
-      <ul id="trade-pick-list" class="pick-list"></ul>
+      <ul id="trade-pick-list" class="pick-list scrolly"></ul>
     </div>
   </div>
 
@@ -236,7 +202,7 @@
         </div>
         <div class="composer-player" id="tc-to-header"></div>
       </div>
-      <div class="composer-body">
+      <div class="composer-body scrolly">
         <div class="composer-column" data-side="from">
           <div class="cash-row">
             <div class="cash-pill" id="tc-from-cash-pill">0 $</div>
@@ -274,7 +240,7 @@
         <h2 id="trade-inbound-title">Incoming trade</h2>
         <button class="modal-close" type="button" data-trade-close>&times;</button>
       </header>
-      <div class="inbound-body" id="trade-inbound-body"></div>
+      <div class="inbound-body scrolly" id="trade-inbound-body"></div>
       <div id="trade-inbound-note" class="trade-note hidden" role="status"></div>
       <footer class="inbound-actions">
         <button id="trade-inbound-accept" class="btn success" type="button">Accept</button>
@@ -286,7 +252,7 @@
   </div>
 
   <div class="modal hidden" id="debt-modal" aria-hidden="true" role="dialog">
-    <div class="modal-content wide">
+    <div class="modal-content wide scrolly">
       <h2>Resolve Debt</h2>
       <p id="debt-summary" class="debt-summary"></p>
       <div class="debt-sections">
@@ -312,7 +278,7 @@
   </div>
 
   <div class="modal hidden" id="setup-modal" aria-hidden="true" role="dialog">
-    <div class="modal-content large">
+    <div class="modal-content large scrolly">
       <h2>New Game</h2>
       <form id="setup-form">
         <div class="form-row">
